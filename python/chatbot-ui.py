@@ -404,7 +404,7 @@ class RenderThread(threading.Thread):
             show_text_image = Image.new(
                 "RGBA",
                 (self.whisplay.LCD_WIDTH, render_y + len(display_lines) * line_height),
-                (255, 255, 255, 255),
+                (255, 245, 209, 255),
             )
             show_text_draw = ImageDraw.Draw(show_text_image)
             for line in display_lines:
