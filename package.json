@@ -16,6 +16,7 @@
     "dotenv": "^16.5.0",
     "get-audio-duration": "^4.0.1",
     "https-proxy-agent": "^7.0.6",
+    "@koa/router": "^13.1.0",
     "koa": "^3.1.2",
     "koa-bodyparser": "^4.4.1",
     "koa-static": "^5.0.0",
