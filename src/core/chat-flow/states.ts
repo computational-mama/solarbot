@@ -2,6 +2,7 @@ import { compact, noop } from "lodash";
 import {
   onButtonPressed,
   onButtonReleased,
+  onButtonDoubleClick,
   onTextInput,
   isButtonDown,
   display,
@@ -26,6 +27,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       ctx.transitionTo("listening");
     });
     onButtonReleased(noop);
+    onButtonDoubleClick(null);
     onTextInput((text: string) => {
       if (ctx.currentFlowName !== "sleep") return;
       ctx.answerId += 1;
@@ -221,6 +223,10 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       ctx.transitionTo("listening");
     });
     onButtonReleased(noop);
+    onButtonDoubleClick(() => {
+      stopPlaying();
+      ctx.transitionTo("sleep");
+    });
   },
 
   image: (ctx: ChatFlowContext) => {
