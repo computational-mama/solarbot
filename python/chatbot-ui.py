@@ -29,6 +29,8 @@ status_font_size=20
 emoji_font_size=40
 battery_font_size=13
 IDLE_RENDER_INTERVAL = 0.5
+ANIMATION_FPS = 2.5
+ANIMATION_DIR = os.path.join(os.path.dirname(__file__), "animations")
 
 # Global variables
 current_status = "Hello"
@@ -86,6 +88,11 @@ class RenderThread(threading.Thread):
         self.current_render_text = ""
         self.pending_auto_scroll_after_hold = False
         self.render_event = threading.Event()
+        self.animation_frames = {}
+        self.animation_frame_index = 0
+        self.animation_last_state = None
+        self.animation_next_frame_time = 0.0
+        self._load_animations()
 
     def render_init_screen(self):
         # Display logo on startup
@@ -96,6 +103,44 @@ class RenderThread(threading.Thread):
             rgb565_data = ImageUtils.image_to_rgb565(logo_image, whisplay.LCD_WIDTH, whisplay.LCD_HEIGHT)
             whisplay.set_backlight(100)
             whisplay.draw_image(0, 0, whisplay.LCD_WIDTH, whisplay.LCD_HEIGHT, rgb565_data)
+
+    def _load_animations(self):
+        if not os.path.isdir(ANIMATION_DIR):
+            return
+        for state in os.listdir(ANIMATION_DIR):
+            state_dir = os.path.join(ANIMATION_DIR, state)
+            if not os.path.isdir(state_dir):
+                continue
+            frame_files = sorted(f for f in os.listdir(state_dir) if f.lower().endswith(".png"))
+            if not frame_files:
+                continue
+            loaded = []
+            for f in frame_files:
+                try:
+                    loaded.append(Image.open(os.path.join(state_dir, f)).convert("RGBA"))
+                except Exception as e:
+                    print(f"[Animation] Failed to load {f}: {e}")
+            if loaded:
+                self.animation_frames[state] = loaded
+                print(f"[Animation] Loaded {len(loaded)} frames for state '{state}'")
+
+    def _get_animation_frame(self, state):
+        frames = self.animation_frames.get(state) or self.animation_frames.get(state.rstrip("."))
+        if not frames:
+            return None
+        if state != self.animation_last_state:
+            self.animation_frame_index = 0
+            self.animation_next_frame_time = time.time() + 1.0 / ANIMATION_FPS
+            self.animation_last_state = state
+        elif time.time() >= self.animation_next_frame_time:
+            self.animation_frame_index = (self.animation_frame_index + 1) % len(frames)
+            self.animation_next_frame_time = time.time() + 1.0 / ANIMATION_FPS
+        return frames[self.animation_frame_index]
+
+    def _animation_wait_timeout(self, state):
+        if not (self.animation_frames.get(state) or self.animation_frames.get(state.rstrip("."))):
+            return None
+        return max(0.0, self.animation_next_frame_time - time.time())
 
     def render_frame(self, status, emoji, text, scroll_top, battery_level, battery_color):
         global current_scroll_speed, current_image_path, current_image, camera_mode
@@ -317,10 +362,18 @@ class RenderThread(threading.Thread):
         status_w = status_bbox[2] - status_bbox[0]
         TextUtils.draw_mixed_text(draw, image, current_status, status_font, (whisplay.CornerHeight, 0))
 
-        # Draw emoji centered
-        emoji_bbox = emoji_font.getbbox(current_emoji)
-        emoji_w = emoji_bbox[2] - emoji_bbox[0]
-        TextUtils.draw_mixed_text(draw, image, current_emoji, emoji_font, ((image_width - emoji_w) // 2, status_font_size + 8))
+        # Draw animation frame or fall back to emoji
+        anim_frame = self._get_animation_frame(status)
+        if anim_frame:
+            size = emoji_font_size
+            scaled = anim_frame.resize((size, size), Image.LANCZOS)
+            paste_x = (image_width - size) // 2
+            paste_y = status_font_size + 8
+            image.paste(scaled, (paste_x, paste_y), scaled)
+        else:
+            emoji_bbox = emoji_font.getbbox(current_emoji)
+            emoji_w = emoji_bbox[2] - emoji_bbox[0]
+            TextUtils.draw_mixed_text(draw, image, current_emoji, emoji_font, ((image_width - emoji_w) // 2, status_font_size + 8))
         
         # Draw battery icon
         status_icon_context = {
@@ -387,6 +440,9 @@ class RenderThread(threading.Thread):
             wait_timeout = None
             if self.pending_auto_scroll_after_hold:
                 wait_timeout = max(0.0, current_scroll_sync_hold_until - time.time())
+            anim_timeout = self._animation_wait_timeout(current_status)
+            if anim_timeout is not None:
+                wait_timeout = min(wait_timeout, anim_timeout) if wait_timeout is not None else anim_timeout
             self.render_event.wait(wait_timeout)
             self.render_event.clear()
             
