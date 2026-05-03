@@ -72,12 +72,12 @@ def register_status_icon_factory(factory, priority=100):
 
 
 class RenderThread(threading.Thread):
-    def __init__(self, whisplay, font_path, fps=30, bg_color=self.bg_color):
+    def __init__(self, whisplay, font_path, fps=30):
         super().__init__()
         self.whisplay = whisplay
         self.font_path = font_path
         self.fps = fps
-        self.bg_color = bg_color
+
         self.render_init_screen()
         # Clear logo after 1 second and start running loop
         time.sleep(1)
@@ -945,7 +945,9 @@ if __name__ == "__main__":
 
     # start render thread
     render_thread = RenderThread(
-        whisplay, custom_font_path or "EBGaramond-Medium.ttf", fps=30, bg_color=UI_BACKGROUND_COLOR
+        whisplay,
+        custom_font_path or "EBGaramond-Medium.ttf",
+        fps=30,
     )
     render_thread.start()
     start_socket_server(render_thread, host="0.0.0.0", port=12345)
