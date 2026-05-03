@@ -125,7 +125,7 @@ class RenderThread(threading.Thread):
                 print(f"[Animation] Loaded {len(loaded)} frames for state '{state}'")
 
     def _get_animation_frame(self, state):
-        frames = self.animation_frames.get(state)
+        frames = self.animation_frames.get(state) or self.animation_frames.get(state.rstrip("."))
         if not frames:
             return None
         if state != self.animation_last_state:
@@ -138,7 +138,7 @@ class RenderThread(threading.Thread):
         return frames[self.animation_frame_index]
 
     def _animation_wait_timeout(self, state):
-        if not self.animation_frames.get(state):
+        if not (self.animation_frames.get(state) or self.animation_frames.get(state.rstrip("."))):
             return None
         return max(0.0, self.animation_next_frame_time - time.time())
 
