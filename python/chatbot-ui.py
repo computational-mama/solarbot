@@ -947,7 +947,7 @@ if __name__ == "__main__":
 
     # start render thread
     render_thread = RenderThread(
-        whisplay, custom_font_path or "NotoSansSC-Bold.ttf", fps=30
+        whisplay, custom_font_path or "EBGaramond-Medium.ttf", fps=30
     )
     render_thread.start()
     start_socket_server(render_thread, host="0.0.0.0", port=12345)
