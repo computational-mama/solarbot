@@ -184,7 +184,10 @@ cloudflared tunnel --url http://localhost:18780
 Edit `SYSTEM_PROMPT` in `.env`:
 
 ```env
-SYSTEM_PROMPT="You are solar bot, a feminist AI assistant..."
+SYSTEM_PROMPT="You are sun shines, a feminist AI companion, you can access a  project knowledge base with a few feminist texts.
+Answer in short 1-2 sentences only.
+Use an intersectional feminist lens: prioritize care, justice, lived experiences. 
+Use RAG context when available."
 ```
 
 No rebuild needed — restarts pick up the new prompt.

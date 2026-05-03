@@ -40,7 +40,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       emoji: "😴",
       RGB: "#000055",
       rag_icon_visible: false,
-      text: "Long Press the button to say something.",
+      text: "Hold to speak with sun shines. >>",
     });
   },
 
@@ -154,7 +154,12 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     const currentAnswerId = ctx.answerId;
     onButtonPressed(() => ctx.transitionTo("listening"));
     onButtonReleased(noop);
-    const { partial, endPartial, getPlayEndPromise, stop: stopPlaying } = ctx.streamResponser;
+    const {
+      partial,
+      endPartial,
+      getPlayEndPromise,
+      stop: stopPlaying,
+    } = ctx.streamResponser;
     let llmResponseText = "";
     const trackingPartial = (text: string): void => {
       llmResponseText += text;
@@ -163,7 +168,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
     ctx.partialThinking = "";
     ctx.thinkingSentences = [];
     [() => Promise.resolve().then(() => ""), getSystemPromptWithKnowledge]
-    [enableRAG ? 1 : 0](ctx.asrText)
+      [enableRAG ? 1 : 0](ctx.asrText)
       .then((res: string) => {
         let knowledgePrompt = res;
         if (res && ctx.knowledgePrompts.includes(res)) {
@@ -172,20 +177,31 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
         if (knowledgePrompt) ctx.knowledgePrompts.push(knowledgePrompt);
         display({ rag_icon_visible: Boolean(enableRAG && knowledgePrompt) });
         const prompt = compact([
-          knowledgePrompt ? { role: "system" as const, content: knowledgePrompt } : null,
+          knowledgePrompt
+            ? { role: "system" as const, content: knowledgePrompt }
+            : null,
           { role: "user" as const, content: ctx.asrText },
         ]);
         chatWithLLMStream(
           prompt,
-          (text) => { if (currentAnswerId === ctx.answerId) trackingPartial(text); },
+          (text) => {
+            if (currentAnswerId === ctx.answerId) trackingPartial(text);
+          },
           () => currentAnswerId === ctx.answerId && endPartial(),
           (partialThinking) =>
-            currentAnswerId === ctx.answerId && ctx.partialThinkingCallback(partialThinking),
+            currentAnswerId === ctx.answerId &&
+            ctx.partialThinkingCallback(partialThinking),
           (functionName: string, result?: string) => {
-            if (functionName === "endConversation" && result?.startsWith("[success]")) {
+            if (
+              functionName === "endConversation" &&
+              result?.startsWith("[success]")
+            ) {
               ctx.endAfterAnswer = true;
             }
-            if (functionName === "generateImage" && result?.startsWith("[success]")) {
+            if (
+              functionName === "generateImage" &&
+              result?.startsWith("[success]")
+            ) {
               const img = getLatestGenImg();
               if (img) display({ image: img });
             }
