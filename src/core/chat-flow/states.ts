@@ -40,9 +40,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       emoji: "😴",
       RGB: "#000055",
       rag_icon_visible: false,
-      ...(getCurrentStatus().text.endsWith("Listening...") || !getCurrentStatus().text
-        ? { text: "Long Press the button to say something." }
-        : {}),
+      text: "Long Press the button to say something.",
     });
   },
 
