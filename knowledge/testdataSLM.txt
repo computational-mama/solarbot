@@ -1,0 +1,792 @@
+Sun shines bright Poster for Misinfocon
+Experiments in running solar powered servers for Small Language Models
+Intro
+
+Since January 2025, I’ve been slowly and patiently building a small solar powered server. The project has been humbling. It’s made me realize how much energy and resources we waste to host simple websites, and AI services. 
+
+In Oct/Nov 2024,  Rhizome.org held an info session where a speaker explained a long term project called Solar Protocol. They call it “A naturally intelligent network”. By hosting simple websites across a network of solar-powered Raspberry Pis they raise not only some important questions about energy consumption, they allow for conversations around community built networks, addressing:  
+our dependence on big tech for small things,
+a gradual decline of the tinkerability of the internet
+our distraction from meaningful content and conversation to vapid details about data and speed 
+
+As I work in the generative AI sector, I’m always thinking about the energy waste that surrounds my work, particularly stuff that can be trivial. To offset the energy consumption of my own projects, I’ve been steadily building out “Sun Shines Bright”. 
+
+Why?
+Udaipur (my home) has 200+ clear days in the year - a good place to start!
+Can it help expand my AI experiments in a guilt-free way?
+If I learn this, can I teach it to others? Can self-hosting be more accessible to non-technologists?
+
+With this project, I’m engaging in a few questions, perhaps they are inspiring for you too: 
+1. How can we self host AI language models with low/renewable resources?
+2. How can we push the boundaries of small computing devices? What does it mean? Why is it needed?
+3. How can we consider our energy usage as indie tech art explorers?
+4. Why not small language models?
+5. What is the infrastructure required to host your own AI models without any focus on scaling? 
+
+
+As indie tinkerers, I don’t know why the onus is always on us to experiment, test and question! ;) Urging software architects and system thinkers to tinker with us and build better AI futures. 
+There is enough evidence now that smaller models, new ARM architecture are more efficient and are good at several tasks. Many of us only need those! After all, we are just using AI for recipes, holidays and heart to heart conversations! ;) 
+
+I’m trying to document the whole process, all hosted on the solar server that I’ve built. Read more here: https://solar.cmama.xyz
+
+
+How to set it up
+
+
+Hardware 
+Raspberry Pi 4 
+32 GB SD card
+Solar Panel 55W
+Solar Charge Controller
+Lead Acid Battery
+Wifi/LAN
+
+Software
+Raspbian OS (headless)
+Docker
+Ollama with Tinyllama and Gemma 3 (1B model)
+OpenWebUI
+
+Bill of Materials
+
+What I bought
+
+
+Solar Panel 55w
+2700
+12 Volt 8 Ah
+890
+Solar Charge Controller 20A
+549
+Dual USB Output 9V / 12V / 24V / 36V Car Charger Switch 5V DC-DC Power Supply Module 3A Buck Regulator
+76
+5V 3A USB to Type C Cable With ON/OFF Switch Power Control for Raspberry Pi 4B (1 Meters Black)
+100
+Domain: https://cmama.xyz
+250
+Total
+4565
+
+
+
+
+What I had lying around
+
+
+Raspberry PI 4 (try to find someone who has one lying around if you are still unsure!) 
+5599
+SD Card
+300
+
+
+
+Next steps 
+
+Running SmolLM with RAG
+Test fine-tuning of Tinyllama to run Measuring Silences (or similar) without RAG
+More barebones approaches to chat UIs 
+
+
+Resources
+
+https://solar.lowtechmagazine.com/
+https://solarprotocol.net/
+https://openwebui.com/
+https://www.ollama.com/
+
+
+Bio 
+Computational Mama’s work explores coding, art and generative AI as a form of camaraderie, friendship, motherhood and self-care. She develops and facilitates beginner content and workshops for creative computation, new approaches to computational thinking and the use of generative AI tools. Her generative AI work explores the biases inherent in large data and generative AI, and she has been exploring the spaces where motherhood and AI converge.
+
+She was a 2021 Processing Fellow and 2020 BeFantastic Fellow, a speaker at Assembling Intelligence, HEAD, Geneva, NYU, Shanghai, BIC, Bump Festival 2023 and more; she has been featured in Casey Reas’ (co-founder Processing) recent list of generative artists doing interesting work.
+
+Her work has been featured in Bangalore International Center (2024), India Art Fair (2022) and Vorspiel / transmediale & CTM (2021).
+
+She also co-runs a creative technology studio called Ajaibghar and Head Developer Relations at Gooey.AI. 
+
+Contact me
+ambika@ajaibghar.com
+
+Hi I’m computational mama, im an artist and creative technologist. My work explores code as a practice of care. I’m deeply interested in the spaces where AI, motherhood and care meet. 
+Over the past year i have been creating a solar powered AI server that runs from the roof of my house. This project runs on a raspberry pi and it explores the spaces where we can build agency and understanding around this new black box technology that has become part of our every day lives. 
+To begin with, let me show you how my solar power server works. I have a solar panel that I have installed on my roof. It’s a very small one about the size of a large poster. It connects to a solar charge controller which is hooked up to a small battery and also to a raspberry pi. In the day, the solar energy powers the raspberry pi and in the night, the battery works as a backup. 
+Once I set up the solar power and started to explore the language models that it could use on it, I realised quite quickly that due to the small size of the system, you could only run small language models. Small language models have become a popular option to run on small devices and seems to be gain popularity also in robotics, but I really wanted to see if it could answer all those critical feminist questions that are always burning in my mind. The short answer was no! Here you can see  I asked it about a well-known feminist scholar from India called Gayatri Chakravarty Spivak and it made up a really strange inaccurate answer.
+
+So I want to understand what it could mean for us to train our own small language model. Now this is not entirely possible with commercial Home electronics and it requires a lot more compute power. I do not have access to this so with some research I found that a fine tuning model seemed to be a good option to try.
+What is a fine tune model you ask? Fine tuning a model through a framework called LoRA. LoRA lets you customize an existing language model by training only a tiny fraction (often <1%) of its parameters, instead of retraining the whole model from scratch.. Unfortunately, it cannot do a lot for factual responses, but definitely allows for some amount of revisions in terms of how a model answers can be affected by the training.
+It all looks very daunting, but the process turned out to be quite simple, though a little bit tedious especially when it comes to collecting and preparing the data set. 
+
+So along with a collaborator Sameera, we decided there will be two kinds of data used for the training data set. One was a close QNA. Which means there is a question like “Who is Fei Fei Li? and there is an answer that she is a computer scientist, et cetera et cetera. 
+The second part was open ended questions which can have subjective answers. For example, here you see me asking the model. What do you understand about carrier bag theory of fiction by Le Guin? Our hope is that it can pick up feminist criticality while answering this question, and also extend that to other queries you might pose to the LLM. 
+
+Once we created this Google sheet of data, we then converted it into a CSV format and then to what is known as JSONL format, that the fine tuning requires. 
+
+Now  can get to the exciting part of fine tuning. This looks a bit taunting with the terminal, but I assure you it’s only a few lines of Code and the document along with this video should give you all the words that you need to copy and paste into the terminal and follow along, so we start by creating an environment in python, and then we install the python packages called MLXNMLXLM, which are specific to the MacBook and silicon chips to Train. You can do this in Windows and Linux to, but you have to Google a little bit and find the relevant tools. This is quite easy. There are a lot of documentation and videos around how to find tune language models with Laura.
+
+So once we’ve got the packages installed, we will run and train the Laura so this just requires a simple command MLX_LM.Laura, then you assign the specific model that you wanted to add along with that data folder where we kept Jason.L file after that, you just need to assign a particular folder where you want to put it in, and the number of iterations is for the times, you wanted to be trained. Once done, it should do for your model. This may take as much time, depending on the computer you are using and the number of rations for about 1300 iterations in my MacBook M1 air 16 GB it took about 15 minutes to do this. it can be faster if you have a more updated model.
+
+If your model is ready, you can now fuse the model with your base model that you were using to train it, and the new model can be then transferred to Ollama to be used in its Chat interface or as an API call whenever required. 
+
+This project is just a way to dip your toes how one can feel more agency with all these new black box technologies. I’d encourage you to build the dataset with friends and collaborators deepening sharing your critical perspectives and deepening our joint understanding of the world - a small ripple effect - a joyous space for knowledge building and care-forward tinkering with technology.  
+
+Sun Shines Bright
+Thinking about AI and Design in climate crises
+
+As designers, we can often feel the burden of actioning change. But how can we pursue ideas and action if we can’t understand the technology that we are to work with? How can we bring back hope to our design processes? 
+
+In this workshop, we will learn, understand and address how AI and Large Language Models affect our work and practice as designers. We will deepen our understanding of collective efforts, build resilience and hope and focus our energies on an inclusive future.  
+
+We will do this by collectively understanding:
+
+the infrastructures and impact that allow us to use AI at our fingertips
+why AI and LLMs are important to future designers
+how conversational UX will define our design practices in the years to come 
+how can we create these infrastructures ourselves
+why future designers need to understand technology and its attached criticalities 
+
+
+And collectively building:
+critical feminist AI bots and interfaces (digital or physical)
+make our mini data center in the classroom
+build some prototypes of renewable energy
+
+Community-learned Language Models
+With help of Sameera Mudgal and other collaborators, we have shared a proposal to extend the ideas of Sun Shines Bright to the community.
+
+Embracing grounding as a sharing and learning experience for the community over making and hacking.
+
+Sun Shines Bright reimagines our relationship with AI and the cloud by demystifying and DIY-ing local and self-hosted AI servers, and cultivating community-led AI systems. The project proposes that grounding technology is as much about building agency and accessibility of usage for diverse creator communities as it is about the materiality of systems to build it. We propose that to “ground the cloud”, we need to embody the principles of care and camaraderie in our technological interventions by:
+
+Creating community, agency and accessibility to use complex AI systems
+Making and hacking simple physical AI infrastructures with solar energy
+Nurturing home-grown, p2p AI servers
+Collecting and training our own Small Language Models that reflect our values and voices
+Rather than naively offering alternative prototypes and end products for one-time use and showcase, we propose simple, radical ways of community building and facilitation that respond with deep, situated and diverse knowledge. We create access, agency, control and understanding of complex AI systems which, when combined with inexpensive and easy-to-use hardware, create potent critical and long-term alternatives to invasive, biased and blackbox systems. We see this effort aligned with the idea of the Solar Mamas of the Barefoot College, India, where rural women were trained in solar electrification of their villages, empowering themselves and their extended community. We envision our project having a similar ripple effect - a joyous space for knowledge building and care-forward tinkering with technology.
+
+Representative image
+Representative image 
+Premise and Urgent Context
+Contemporary life is inextricably linked to massively scaled AI systems trained on biased datasets and hosted in energy-intensive data centers. As an alternative, can community-learned, solar-powered small language models create new forms of technological intimacy that resist extraction while fostering care?
+
+Inspired by Solar Protocol, which they call ‘A Naturally Intelligent Network’, Sun Shines Bright’s proof of concept simultaneously explores low-energy and sustainable model hosting and opportunities and efficacies of Small Language Models. The early experiments (Jan-Mar 2025) and subsequent workshop at NYU Shanghai (April 2025) proved that building a simple solar-powered server for hosting AI models is not only possible but can be easily shared and explored with students and creatives from non-technology backgrounds. This was followed up by an exhibit and zine about Sun Shines Bright at AIxDESIGN Festival: On Slow AI, May 2025 and Chaos Feminist Convention July 2025. Several feminist non-technologist creators have expressed their interest in building their own solar servers. This reflects an urgent need for:
+
+agency over the mainstream high-power black-boxed AI systems
+dissociation and simple solutions from current cloud-based models,
+These models are climatically problematic and also do not reflect critical feminist non-white data. Now more than ever, we need camaraderie, friendship and intimacy as pillars of building agency and ease around fast-paced complex AI systems.
+
+
+ ﻿Gagandeep Kang
+	STEM
+	Indian virologist and immunologist; Executive Director of Translational Health Science and Technology Institute (THSTI); first Indian woman elected Fellow of Royal Society (2019)
+	ROTAVAC vaccine development; Efficacy of a monovalent human-bovine (116E) rotavirus vaccine in Indian infants: a randomised, double-blind, placebo-controlled trial.
+	Tessy Thomas
+	STEM
+	Indian aerospace engineer known as 'Missile Woman of India'; first female scientist to head missile project; Director-General of Aeronautical Systems DRDO
+	Guidance Scheme for Solid Propelled Vehicle during Atmospheric Phase
+	Aditi Sen De
+	STEM
+	Indian quantum physicist; first female physicist to win Shanti Swarup Bhatnagar Prize (2018); professor at Harish-Chandra Research Institute
+	Characterizing Entanglement by Local Operations and Classical Communication
+	Asima Chatterjee
+	STEM
+	Indian organic chemist and medicinal researcher; first woman to receive Doctor of Science degree from Indian university; first woman General President of Indian Science Congress
+	Anti-malarial drug development; Development of Anti-epileptic Drug 'Ayush-56'
+	Janaki Ammal
+	STEM
+	Indian botanist and cytogeneticist; pioneering work on plant breeding and cytogenetics; first Indian scientist to receive Padma Shri Award (1977)
+	Cytological studies in Saccharum (Sugarcane); Cytogenetics and phytogeography studies
+	Kamal Ranadive
+	STEM
+	Indian biomedical researcher; established first tissue culture laboratory in India at Indian Cancer Research Centre; founder of Indian Women Scientist Association
+	Foundational studies on the link between breast cancer and heredity, Indian Cancer Research Centre
+	Kamala Sohonie
+	STEM
+	Indian biochemist; first Indian woman to receive PhD in scientific discipline; discovered enzyme cytochrome C in plants; first female student of C.V. Raman
+	Isolation and purification of 'Neera' enzyme; Cytochrome C discovery in plant cells; Enzyme mechanisms and energy synthesis; Electron transport chain research
+	Darshan Ranganathan
+	STEM
+	Indian biochemist and bioorganic chemist; pioneering research in protein folding and design; expert in synthetic protein creation
+	The synthesis of imidazole
+	Rajeshwari Chatterjee
+	STEM
+	Indian electrical engineer; first female engineer from Karnataka; pioneered microwave engineering research at IISc
+	An introduction to microwave engineering, book
+	Indira Hinduja
+	Medicine
+	Indian gynaecologist and infertility specialist; pioneered GIFT technique in India; delivered India's first test-tube baby (1986)
+	Pioneering Gamete Intrafallopian Transfer (GIFT)
+	Aditi Pant
+	STEM
+	Indian oceanographer; first Indian woman to visit Antarctica (1983); researcher in marine algae physiology
+	the effect of tropical light intensities on photosynthesis by natural plankton communities and the nature and amount of reduced carbon flow from phytoplankton to bacteria; Phytoplankton in the antarctic zone: concentration, photosynthesis and optical properties
+	Ritu Karidhal
+	STEM
+	Indian aerospace engineer and scientist; Mission Director of Chandrayaan-2 lunar mission; leading space scientist at ISRO
+	Trajectory design and management for Chandrayaan-2
+	Mangala Mani
+	STEM
+	Indian space scientist; first ISRO scientist to spend over one year in Antarctica; ground station operator at research facilities
+	CHALLENGES IN OPERATIONS AND MAINTENANCE OF ANTARCTICA GROUND STATION FOR EARTH OBSERVATION SATELLITES
+	Sunita Sarawagi
+	STEM
+	Indian computer scientist at IIT Bombay; distinguished researcher in databases and data mining; pioneering work in data extraction
+	Effective techniques for transforming unstructured data into structured data
+	Kalpana Chawla
+	STEM
+	First Indian-American astronaut and first Indian woman in space; Space Shuttle Columbia mission specialist; NASA astronaut
+	NASA Space Shuttle Mission Reports (STS-87 and STS-107)
+	Suman Sahai
+	Agriculture
+	Indian biotech researcher and social activist; founder of Gene Campaign; voice for farmers' patent rights; advocate for traditional knowledge
+	Neem patent campaign; Turmeric patent advocacy; Globalisation and the crisis of livelihood
+	Faith Osier
+	STEM
+	Kenyan immunologist specializing in malaria research; leading researcher on malaria vaccine development; head of International Union of Immunological Societies
+	Antibodies to the N-terminal Block 2 of Plasmodium falciparum Merozoite Surface Protein 1 are a novel correlate of protection against clinical malaria
+	Francisca Okeke
+	STEM
+	Nigerian physicist at University of Nigeria; first woman head of physics department; researches ionosphere and Earth's magnetic field
+	Day-to-day variability of geomagnetic hourly amplitudes at low latitudes
+	Julie Makani
+	Medicine
+	Tanzanian hematologist; leading researcher on sickle cell disease treatment; monitored over 2000 sickle cell patients; Archbishop Desmond Tutu Fellow
+	Sickle cell disease: the global challenge
+	Tebello Nyokong
+	STEM
+	South African chemist; pioneering research in nanotechnology and photodynamic therapy for cancer treatment
+	The synthesis and spectral properties of phthalocyanines
+	Ama Sey-Owusu
+	STEM
+	Ghanaian physicist and climate scientist; contributing to climate change research and environmental science studies
+	Nationalism in Question: A Study of Key Categories in Ghanaian History
+	Idelisa Bonnelly
+	STEM
+	Dominican marine biologist and conservationist; known as 'Mother of Marine Conservation in Caribbean'; founded first marine sciences institute in Dominican Republic
+	Informe Sobre la Pesca en la Republica Dominicana
+	Ellen Ochoa
+	STEM
+	Pioneer engineer and astronaut; first Latina to reach space (1993); director of NASA's Johnson Space Center; Chair of National Science Board
+	An optical inspection system for automated inspection of integrated circuit chips
+	Gabriela Gonzalez
+	STEM
+	Argentine physicist; crucial team member of LIGO gravitational-wave detection; spokesperson for LIGO Scientific Collaboration (2011-2017)
+	Observation of Gravitational Waves from a Binary Black Hole Merger
+	María Blasco
+	STEM
+	Spanish molecular biologist; world expert in telomeres and telomerase; champion for gender equality in STEM
+	Telomere length and telomerase in cancer: from basics to clinic
+	Sabrina Gonzalez Pasterski
+	STEM
+	Cuban American theoretical physicist; discovered spin memory effect; praised by Stephen Hawking; licensed pilot who built own aircraft
+	New Soft Theorems
+	Dení Ramírez Macías
+	STEM
+	Mexican marine biologist and whale shark conservationist; founded Whale Shark Mexico; contributed to three marine protected areas creation
+	An integrated conservation strategy for the whale shark (Rhincodon typus) in the Gulf of California
+	Maria Elena Bottazzi
+	Medicine
+	Honduran microbiologist and vaccine researcher; co-created Corbevax COVID-19 vaccine; associate dean at Baylor College of Medicine
+	The Corbevax vaccine: a low-cost, open-source vaccine for global access
+	Susana López Charretón
+	STEM
+	Mexican virologist specializing in rotavirus; identified viral entry mechanisms; international recognition for rotavirus research
+	Structural and functional analysis of the Rotavirus VP4 protein
+	Valeria de Paiva
+	STEM
+	Brazilian computer scientist; researches logical approaches to computation and artificial intelligence; principal scientist at Nuance
+	The Dialectica Interpretation and its categorical setting; Computational logic and category theory; Natural language processing; AI foundations and type theories
+	Anandibai Gopalrao Joshi
+	Medicine
+	Indian physician pioneer; first Indian woman to earn medical degree in Western hemisphere (1885); pioneered women's medical education
+	Obstetrics among the Aryan Hindoos
+	Senamile Masango
+	STEM
+	South African nuclear physicist; Board member of Nuclear Energy Corporation of South Africa; pursuing PhD in nuclear physics at University of Western Cape
+	Technical reports on the iThemba LABS Gamma-Ray Spectrometer Array (AFRODITE)
+	Marie Korsaga
+	STEM
+	Burkinabe astrophysicist; doctoral research on galaxy matter distribution; pioneering African astrophysicist in the field
+	Deep imaging of the interacting dark matter-dominated galaxy pair NGC 4490/4485
+	Aster Tsegaye
+	STEM
+	Ethiopian HIV/AIDS researcher; training researchers in sub-Saharan Africa; contributing to infectious disease prevention
+	Factors associated with HIV-1 infection among sex workers of Addis Ababa, Ethiopia
+	Zenzile Miriam Makeba
+	Media
+	Singer and civil rights activist known for becoming the first African artist to globally popularize African music
+	Songs; Pata Pata; The Click Song
+	Veronica Okello
+	STEM
+	Kenyan chemist at Machakos University; researching green approaches to remove heavy metals like chromium and arsenic
+	Evaluation of the physico-chemical and pasting properties of starch from five different sources in Ugand
+	Angela Tabiri
+	STEM
+	Ghanaian mathematician specializing in quantum algebra; founded network of female mathematicians; advancing women in mathematics
+	Papers on Morita equivalence of twisted group algebras in fusion categories
+	Patricia Berjak
+	STEM
+	South African seed scientist; world leader in seed research and storage; pioneering work on plant germplasm preservation
+	Recalcitrant seeds: the conundrum of desiccation sensitivity
+	Gita Ramjee
+	STEM
+	Ugandan-South African HIV prevention scientist; Chief Scientific Officer in HIV prevention at Aurum Institute; pioneering microbicide research
+	Effectiveness of COL-1492, a nonoxynol-9 vaginal gel, on HIV-1 transmission in female sex workers: a randomised controlled tria
+	Salimata Wade
+	Agriculture
+	Senegalese agricultural scientist; contributing to African sustainable agriculture research and food security
+	Comparison of the efficacy of a solid ready-to-use food and a liquid, milk-based diet for the rehabilitation of severely malnourished children: a randomized trial
+	Karimat El-Sayed
+	STEM
+	Egyptian crystallographer and physicist; pioneer in physics education for women in Arabic-speaking countries; distinguished academic career
+	The crystal structure (at five temperatures) and anisotropic thermal expansion of anthraquinone
+	Hasnaa Chennaoui Aoudjehane
+	STEM
+	Moroccan geologist specializing in meteorites; member of International Meteorite Nomenclature Committee; advocates for geological heritage preservation
+	The Meteoritical Bulletin, No. 93
+	Luz Amparo Triana Moreno
+	STEM
+	Colombian biologist; pioneering work on pteridology (fern biology) and botany; ecological research contributions at University of Caldas
+	A community‐derived classification for extant lycophytes and ferns
+	Ángela Restrepo
+	Medicine
+	Colombian microbiologist and medical researcher; pioneering fungal disease research; trained generations of medical researchers
+	Paracoccidioidomycosis
+	Lydia Villa-Komaroff
+	STEM
+	Cuban American molecular biologist; pioneering work on insulin production through genetic engineering; contributed to diabetes treatment advances
+	A bacterial clone synthesizing proinsulin
+	Helen Rodríguez-Trías
+	Medicine
+	Puerto Rican physician and social activist; pioneered women's health advocacy and reproductive rights; first woman president of American Public Health Association
+	A Model for Advocacy: From Proposals to Policy; forced sterilization
+	Wangari Maathai
+	Environmental Science
+	Kenyan environmental and political activist; Nobel Peace Prize winner (2004); founder of Green Belt Movement; first African woman to win Nobel Peace Prize
+	The Green Belt Movement: Sharing the Approach and the Experience (1988)
+	Mangala Narlikar
+	STEM
+	Indian mathematician and astrophysicist; pioneered conformal gravity theory with husband Jayant Narlikar; contributed to cosmology research
+	A Cosmic Adventure; Fun and Fundamentals of Mathematics
+	Adidja Amani
+	Medicine
+	Helps run vaccination programmes at Cameroon's public-health ministry.
+	Report on an international workshop on kangaroo mother care: lessons learned and a vision for the future; COVID-19 vaccine acceptance and hesitancy in Cameroon: a systematic review and meta-analysis
+	Elizabeth Kimani-Murage
+	Social Science
+	Researcher focused on maternal and child health, urban food environments, and nutrition.
+	Evidence of a Double Burden of Malnutrition in Urban Poor Settings in Nairobi, Kenya
+	
+
+
+
+Fei-Fei Li
+	STEM
+	Chinese-American computer scientist leading AI research at Stanford
+	ImageNet: A large-scale hierarchical image database
+	Rohini Godbole
+	STEM
+	Physicist
+	Drees-Godbole Effect and Higgs Boson Phenomenology
+	Bibha Chowdhuri
+	STEM
+	Physicist known for cosmic ray studies in Manchester
+	A Photographic Method of Estimating the Mass of the Mesotron
+	Segenet Kelemu
+	Agriculture and Industry
+	Scientist and agricultural researcher
+	African edible insects for food and feed: Inventory; diversity; commonalities and contribution to food security
+	Vandana Shiva
+	Agriculture and Industry
+	Indian scholar; environmental activist; food sovereignty advocate; ecofeminist and anti-globalization author. Based in Delhi
+	Earth Democracy (2005); Seeds of Suicide (2015); Environmental Ethics
+	Wangari Maathai
+	Agriculture and Industry
+	Environmentalist and founder of Green Belt Movement from Kenya. Nobel Peace Prize laureate (2004)
+	Unbowed: A Memoir (2006); Nobel Prize Lecture 2004
+	Mira Nair
+	Communications and Media
+	Indian filmmaker
+	Monsoon Wedding (2001 film); Mississippi Masala (1991); Vanity Fair (2004)
+	Ruth E Carter
+	Communications and Media
+	American costume designer
+	Black Panther (2018); Costume Design Awards; Fashion Innovation
+	Malala Yousafzai
+	Law
+	Pakistani activist and Nobel laureate
+	I Am Malala: The Girl Who Stood Up for Education and Was Shot by the Taliban (2013); Nobel Peace Lecture 2014
+	Chimamanda Ngozi Adichie
+	Literature
+	Nigerian author
+	Americanah (2013); Half of a Yellow Sun (2006); Purple Hibiscus (2003)
+	Arundhati Roy
+	Literature
+	Indian author
+	The God of Small Things (1997 Booker Prize); The Ministry of Utmost Happiness (2017)
+	Clarice Lispector
+	Literature
+	Brazilian author
+	The Hour of the Star (1977); A Passion According to G.H. (1964)
+	Laura Esquivel
+	Literature
+	Mexican author; peer of Gabriel García Márquez
+	Like Water for Chocolate (1989); Malinche (2006)
+	Toni Morrison
+	Literature
+	African-American author
+	Beloved (1987 Pulitzer Prize); Song of Solomon (1977); Nobel Prize in Literature 1993
+	Jamaica Kincaid
+	Literature
+	Caribbean-American author
+	Girl (1978); Annie John (1985); Lucy (1990)
+	Yoko Ogawa
+	Literature
+	Japanese author
+	The Housekeeper and the Professor (2003); Hotel Iris (2010)
+	Oyèrónkẹ́ Oyěwùmí
+	Social Science
+	Nigerian-American sociologist; first African woman to win Distinguished Africanist Award; authored 'The Invention of Women' examining Western gender discourses
+	The Invention of Women: Making an African Sense of Western Gender Discourses (1997 Distinguished Book Award); Gender Epistemologies in Africa
+	Neera Desai
+	Social Science
+	Indian sociologist; founder of Research Unit for Women's Studies; pioneer of Women's Studies in India; researcher and political activist
+	Women in Modern India; Matriliny and Islam (1997); Research Unit for Women's Studies Publications
+	Lucrecia Martel
+	Communications and Media
+	Argentine filmmaker; considered one of best working directors in world cinema; explores social issues; presided over Venice Film Festival jury 2019
+	La Ciénaga (2001); The Headless Woman (2008); Zama (2017) - BBC listed as one of 100 best films of 21st century
+	Chloé Zhao
+	Communications and Media
+	Chinese-American filmmaker; first Asian woman to win Oscar for Best Director; directed 'Nomadland' which won Best Picture
+	Nomadland (2020 Academy Award for Best Picture and Best Director); The Eternals (2021 Marvel film)
+	Jalila Baccar
+	Communications and Media
+	Tunisian actress; playwright; theatre director; over 17 theatre productions and 7 films; received Order of Arts and Letters 2010
+	Theatre Production; In Search of Aïda; Junun (2015); Tunisian Cinema and Theatre
+	Samira Makhmalbaf
+	Communications and Media
+	Iranian filmmaker; youngest director at Cannes Film Festival age 17; directed 'At Five in the Afternoon'; first feature film shot in post-Taliban Afghanistan
+	At Five in the Afternoon (2003 Cannes Winner); The Apple (1998); Iranian Cinema Innovation
+	Julie Taymor
+	Communications and Media
+	American theatre and film director; innovative in puppetry and visual storytelling; directed 'The Lion King' on Broadway; Tony Award winner
+	The Lion King Broadway Production (Tony Award); Across the Universe (2007 film); Artistic Direction Publications
+	Leela Dube
+	Social Science
+	Indian anthropologist and feminist scholar; expert on women and kinship; instrumental in shaping 'Towards Equality' report 1974; shaped women's studies in Indian academia
+	Matriliny and Islam (1997); Women and Kinship: Comparative Perspectives on Gender
+	Sharmila Rege
+	Social Science
+	Indian sociologist and Dalit-feminist scholar; founder of Krantijyoti Savitribai Phule Women's Studies Centre; championed Ambedkarite feminist ideologies; critic of gender and caste exclusions
+	Writing Caste/Writing Gender: Narrating Dalit Women's Testimonios (2006)
+	Tarabai Shinde
+	Social Science
+	Indian feminist activist; protested patriarchy and caste discrimination; contested patriarchal Hindu scripture interpretations; radical feminist voice of 19th century
+	Stri Purush Tulana (1882) - Comparison of Women and Men
+	Poile (Ambika) Sengupta
+	Communications and Media
+	Indian playwright; foremost contemporary dramatist in English; pioneered 'Theatre of Protest'; explored women's oppression and social issues
+	Mangalam (1993); Women's experience and protest theatre
+	Manjula Padmanabhan
+	Communications and Media
+	Indian playwright; cartoonist; novelist; artist; multi-talented creator; tackled organ trafficking; surrogacy; women's violence through powerful drama
+	Lights Out (1986); Khipu-Khipu; Body Blows - Women; Violence and Survival
+	Lucky Enam
+	Communications and Media
+	Bangladeshi theatre director and playwright; founder of Nagorik Natyangan; established drama institute; Ekushey Padak 2019 awardee; scripted and directed innovative theatre
+	Kholosh (1995); Nagorik Natyangan Institute of Drama
+	Nilufar Matin
+	Communications and Media
+	Bangladeshi theatre director; first generation female director of Bangladesh (1972); broke gender barriers in theatre directorship
+	Unmachan (1972); Pioneer directorial work
+	Saieda Morsheda Khanam
+	Communications and Media
+	Bangladeshi theatre director and set designer; first generation female director; also pioneering set designer; multi-talented theatre practitioner
+	Ranghin Signal (1972); Baki Itihash (1973 set design)
+	Ela Bhatt
+	Social Science and Labour Rights
+	Indian founder of SEWA (Self Employed Women's Association); built world's largest women's organization with 1.9 million members across South Asia; revolutionary approach to women workers' dignity; cooperatives; economic empowerment
+	SEWA organization; Women workers' cooperative model; Gender and labour rights
+	Tu Youyou
+	STEM
+	Chinese pharmaceutical scientist who discovered artemisinin
+	Antimalaria studies of Qinghaosu; Chemical studies on qinghaosu (artemisinin)
+	Michelle Simmons
+	STEM
+	Australian quantum computing pioneer and Director of the Center of Excellence for Quantum Computation and Communication Technology at UNSW.
+	Single-atom transistor in silicon; Quantum computing research in silicon
+	Niveen Khashab
+	STEM
+	Saudi Arabian chemical engineer and nanotechnologist at King Abdullah University of Science and Technology (KAUST). Pioneered design of nanoparticles for disease detection.
+	Mechanised nanoparticles for drug delivery; Mesoporous silica nanoparticles for biomedical applications
+	Meemann Chang
+	STEM
+	Chinese paleontologist and Member of Chinese Academy of Sciences. Pioneer in vertebrate paleontology with groundbreaking fossil research.
+	Youngolepis cranial anatomy and evolution; Fossil fish studies of early tetrapod evolution
+	Hailan Hu
+	STEM
+	Chinese neuroscientist at Zhejiang University. Pioneering discoveries in neurobiology and depression research. Executive Director of Neuroscience Center.
+	Social Emotional Behavior and Mental Disorder Neurobiology Research; Depression Mechanism Research
+	Kyoko Nozaki
+	STEM
+	Japanese synthetic chemist at University of Tokyo. Pioneering contributions to synthetic chemistry and industrial innovation in environmentally friendly production processes.
+	Synthetic Chemistry for Sustainable Agriculture and Medicine; Green chemistry publications
+	Agnès Binagwaho
+	STEM
+	Rwandan physician and public health leader. Pioneer in malaria prevention
+	immunization advancement and support for young scientists in Africa. Pregnancy-Associated Malaria Research; Polio Eradication Efforts; Immunization Programs
+	Firdausi Qadri
+	STEM
+	Bangladeshi immunologist and vaccine researcher. Senior scientist at International Centre for Diarrhoeal Disease Research in Bangladesh.
+	Infectious Disease Prevention and Early Diagnosis; Childhood Disease Vaccination Research
+	Abla Mehio Sibai
+	STEM
+	Syrian immunologist and public health researcher. Head of Mucosal Immunology and Vaccinology Unit in Bangladesh.
+	Infectious Disease Prevention in Developing Countries; Child Health Vaccination Research
+	Zohra Ben Lakhdar
+	STEM
+	Tunisian physicist specializing in infrared spectroscopy. Pioneer in pollution detection and medical applications through spectroscopy.
+	Infrared Spectroscopy Models and Applications; Pollution Detection Research
+	Anna Mani
+	STEM
+	Indian meteorologist (1918-2001). Deputy Director-General of India Meteorological Department. Pioneer in understanding solar radiation, ozone, and wind energy.
+	Solar Radiation and Wind Energy Measurement Tools; Ozone Research; Meteorological Instrumentation Publications
+	Nayantara Ranganathan
+	Social Science
+	Indian researcher and lawyer working on digital rights, feminist politics of data, and technology. Co-founder of ad.watch and Gendering Surveillance projects.
+	Gendering Surveillance: Exposing Gendered Surveillance in India; Digital Rights Research Publications; Feminist Politics of Data
+	Xie Xide
+	STEM
+	Chinese physicist (1921-2000). Influential educator and pioneer researcher of solid-state physics in China.
+	Solid-State Physics Research; Semiconductor Physics
+	Henriette Bui Quang Chieu
+	STEM
+	Vietnamese physician (1906-2012). First Vietnamese woman to receive a medical degree. Pioneer in gynecology and advocacy for Vietnamese healthcare rights.
+	Gynecological and Obstetric Research; Acupuncture Applications in Obstetrics; Healthcare advocacy publications
+	Azar Andami
+	STEM
+	Iranian physician and bacteriologist (1926-1984). Developer of cholera vaccine during the 1937 pandemic affecting Middle East, India, Southeast Asia, and Africa.
+	Cholera Vaccine Development; Bacterial Research Publications; Pandemic Response Studies
+	Chico Mendes
+	Agriculture and Industry
+	Brazilian environmental activist and labor rights leader. Pioneer in sustainable forest conservation and indigenous rights advocacy.
+	Environmental Activism Publications; Sustainable Forest Conservation Model; Indigenous Rights Advocacy
+	Maria Teresa Ruiz
+	STEM
+	Chilean astrophysicist. Discovered new type of celestial body (brown dwarf). Pioneering woman in Latin American astronomy.
+	Discovery of Brown Dwarfs; Astrophysical Research Publications
+	Zhenan Bao
+	STEM
+	Chinese-American chemical engineer at Stanford University. Inventor of skin-inspired electronic materials for next-generation devices.
+	Skin-inspired electronic materials and devices; Organic field-effect transistors for flexible electronics
+	
+
+What was the primary food source for early humans?
+	In temperate and tropical regions where hominids evolved, "the principal food of the species was vegetable." Sixty-five to eighty percent "was gathered; only in the extreme Arctic was meat the staple food." Le Guin notes "The mammoth hunters spectacularly occupy the cave wall and the mind, but what we actually did to stay alive and fat was gather seeds, roots, sprouts, shoots, leaves, nuts, berries, fruits, and grains."
+	Why does storytelling favor hunting over gathering?
+	Le Guin demonstrates the contrast: gathering stories about wrestling "a wild-oat seed from its husk, and then another, and then another" cannot "compete with how I thrust my spear deep into the titanic hairy flank while Oob, impaled on one huge sweeping tusk, writhed screaming." That mammoth story "not only has Action, it has a Hero." It wasn't the meat that mattered - "It was the story."
+	What does Le Guin propose as the first cultural device?
+	Elizabeth Fisher argues "the earliest cultural inventions must have been a container to hold gathered products and some kind of sling or net carrier." Le Guin embraces this, listing: "A leaf a gourd shell a net a bag a sling a sack a bottle a pot a box a container. A holder. A recipient." She calls herself "an adherent of what Fisher calls the Carrier Bag Theory of human evolution."
+	How does the hero narrative exclude people?
+	Le Guin explains that when culture was framed as "originating from and elaborating upon the use of long, hard objects for sticking, bashing, and killing, I never thought that I had, or wanted, any particular share in it." She was told: "What you are is a woman. Possibly not human at all, certainly defective." Only by recognizing the container as fundamental could she feel "human after all. Fully, freely, gladly, for the first time."
+	List the elements Le Guin includes in her 'carrier bag' of science fiction.
+	Her carrier bag is "full of wimps and klutzes, and tiny grains of things smaller than a mustard seed," plus "intricately woven nets which when laboriously unknotted are seen to contain one blue pebble, an imperturbably functioning chronometer telling the time on another world, and a mouse's skull." It contains "beginnings without ends, of initiations, of losses, of transformations and translations" and "space ships that get stuck, missions that fail."
+	What does Virginia Woolf's glossary reveal about heroes?
+	When planning Three Guineas, Woolf "had thought of reinventing English according to her new plan, in order to tell a different story." In her glossary, "heroism" is defined as "botulism" and "hero" as "bottle." Le Guin calls this "The hero as bottle, a stringent reevaluation" and proposes "the bottle as hero" - the container rather than the weapon."
+	How does work change when we consider gathering instead of hunting?
+	Gathering required far less effort than what came after. Le Guin notes: "The average prehistoric person could make a nice living in about a fifteen-hour work week" - "much less hard than peasants slaving in somebody else's field after agriculture was invented, much less hard than paid workers since civilization was invented." This left "a lot of time for other things."
+	Why does Le Guin call the hero narrative the 'killer story'?
+	Le Guin describes "the story the mammoth hunters told about bashing, thrusting, raping, killing, about the Hero. The wonderful, poisonous story of Botulism. The killer story." She traces its violence: "how the mammoth fell on Boob and how Cain fell on Abel and how the bomb fell on Nagasaki and how the burning jelly fell on the villagers and how the missiles will fall on the Evil Empire."
+	What shape should narrative take according to Le Guin?
+	The Hero decreed "the proper shape of the narrative is that of the arrow or spear, starting here and going straight there and THOK! hitting its mark (which drops dead)." But Le Guin differs: "the natural, proper, fitting shape of the novel might be that of a sack, a bag." A novel as "medicine bundle, holding things in a particular, powerful relation to one another and to us."
+	Summarize Le Guin's critique of conflict-centered narrative.
+	Le Guin rejects the Hero's decree "that the central concern of narrative, including the novel, is conflict." She calls "the reduction of narrative to conflict" absurd, citing a manual claiming "A story should be seen as a battle." Within the carrier bag structure, conflict is just one "necessary element of a whole which itself cannot be characterized either as conflict or as harmony, since its purpose is neither resolution nor stasis but continuing process."
+	What happens to the Hero in a carrier bag structure?
+	Le Guin observes: "it's clear that the Hero does not look well in this bag. He needs a stage or a pedestal or a pinnacle. You put him in a bag and he looks like a rabbit, like a potato." This is why she likes novels: "instead of heroes they have people in them." The container structure resists heroic glorification and centers ordinary, complex humanity."
+	How does the carrier bag theory ground Le Guin personally?
+	This theory "grounds me, personally, in human culture in a way I never felt grounded before." Previously, if making weapons was what defined humanity, "I was either extremely defective as a human being, or not human at all." But recognizing that "to put something you want, because it's useful, edible, or beautiful, into a bag" as human allowed her full participation in culture."
+	Compare weapon-making to container-making as cultural origins.
+	Weapons were "a late, luxurious, superfluous tool" compared to containers. Le Guin asks: "what's the use of digging up a lot of potatoes if you have nothing to lug the ones you can't eat home in?" She argues "with or before the tool that forces energy outward, we made the tool that brings energy home." The Carrier Bag Theory reverses the priority given to weapons."
+	What does Le Guin mean by calling herself 'an aging, angry woman laying mightily about me with my handbag'?
+	She clarifies: "Not, let it be said at once, an unaggressive or uncombative human being." She fights "hoodlums off" but notes "I don't, nor does anybody else, consider myself heroic for doing so. It's just one of those damned things you have to do in order to be able to go on gathering wild oats and telling stories." Necessary defense enables life-sustaining work."
+	How might the carrier bag theory apply to technology design?
+	Le Guin suggests redefining "technology and science as primarily cultural carrier bag rather than weapon of domination." If technology is conceived as holding, gathering, and sustaining rather than conquering, it "can be seen as a far less rigid, narrow field, not necessarily Promethean or apocalyptic at all." This shifts from "Man conquers earth, space, aliens, death" to technology that holds and relates things in "continuing process."
+	What is the relationship between containers and the sacred?
+	Le Guin traces the container's expanding purpose: "you take it out and eat it or share it or store it up for winter in a solider container or put it in the medicine bundle or the shrine or the museum, the holy place, the area that contains what is sacred." Containers don't just hold physical objects but "what is sacred" - what communities value enough to preserve and pass on."
+	Why does Le Guin seek 'the untold one, the life story'?
+	She warns: "It sometimes seems that the story is approaching its end. Lest there be no more telling of stories at all, some of us out here in the wild oats, amid the alien corn, think we'd better start telling another one." The killer story may finish us: "we've all let ourselves become part of the killer story, and so we may get finished along with it." Hence her urgent search for alternatives."
+	What does science fiction become when reconceived through the carrier bag?
+	If science fiction "is the mythology of modern technology," its myth as Techno-Heroic is tragic - "triumphant (Man conquers earth, space, aliens, death, the future, etc.) and tragic (apocalypse, holocaust, then or now)." But as carrier bag, it becomes "a far less rigid, narrow field" and "less a mythological genre than a realistic one" - describing "what people actually do and feel, how people relate to everything else."
+	Summarize what Le Guin means by 'home being another, larger kind of pouch or bag'.
+	Home functions as "a container for people." Just as gathering requires containers to "take it home with you," the home itself is a carrier bag - a space that holds, sustains, and protects. This expands the container metaphor from objects to spaces to social structures. The carrier bag becomes fundamental to how humans create sustaining environments at every scale."
+	What labor does the hero narrative make invisible?
+	The Hero's story absorbs everything else: "the men and women in the wild-oat patch and their kids and the skills of makers and the thoughts of the thoughtful and the songs of the singers are all part of it, have all been pressed into service in the tale of the Hero. But it isn't their story. It's his." Gathering, making, thinking, singing - all the sustaining work - gets erased."
+	
+
+What does Lorde mean by "the master's tools"?
+	The master's tools are methods from "racist patriarchy" - like tokenism, exclusion, treating difference as threat rather than strength. Lorde warns these "may allow us temporarily to beat him at his own game, but they will never enable us to bring about genuine change." Tools = frameworks that perpetuate existing power.
+	Why does Lorde call tokenism at the conference a problem?
+	She was invited as "the only panel at this conference where the input of Black feminists and lesbians is represented" - to comment on difference, while other panels assumed "lesbian and Black women have nothing to say about existentialism, the erotic, women's culture." This segregates marginalized voices to "special topics."
+	What's wrong with "tolerance" of difference according to Lorde?
+	Lorde declares "Advocating the mere tolerance of difference between women is the grossest reformism. It is a total denial of the creative function of difference in our lives." Tolerance treats difference as burden to endure. Instead, difference must be "a fund of necessary polarities between which our creativity can spark like a dialectic."
+	List the specific groups Lorde says are excluded from feminist theory
+	Poor women, Black and Third World women, lesbians. She notes the absence means no examination of "lesbian consciousness or the consciousness of Third World women" and asks pointedly about "the women who clean your houses and tend your children while you attend conferences on feminist theory."
+	How does Lorde distinguish between "passive be" and "active being"?
+	In patriarchal nurturance models, women exist "to be used." But "Interdependency between women" creates freedom where "the I" can be "in order to be creative." This shifts from women as resources (passive existence serving others) to women as agents (active creation through mutual support).
+	What does Lorde mean saying difference is where "our personal power is forged"?
+	She states explicitly: "Difference is that raw and powerful connection from which our personal power is forged." Those "forged in the crucibles of difference" - poor, lesbian, Black, older women - know "survival is not an academic skill. It is learning how to take our differences and make them strengths."
+	Summarize why Lorde rejects the idea that white feminists don't know who to ask
+	She calls this "the same evasion of responsibility" that keeps "Black women's art out of women's exhibitions, Black women's work out of most feminist publications." Lorde quotes Adrienne Rich asking: if feminists educated themselves enormously over ten years, "how come you haven't also educated yourselves about Black women?"
+	Why does the essay argue community requires keeping differences visible?
+	Lorde warns "Without community there is no liberation, only the most vulnerable and temporary armistice between an individual and her oppression. But community must not mean a shedding of our differences, nor the pathetic pretense that these differences do not exist." Erasure weakens collective power.
+	What does Lorde mean calling it "academic arrogance" to discuss theory without difference?
+	It's "particular academic arrogance to assume any discussion of feminist theory without examining our many differences, and without a significant input from poor women, Black and Third World women, and lesbians." Academic privilege enables ignoring material realities of those cleaning houses, facing 42nd Street prostitution.
+	Compare patriarchal versus feminist models of nurturance in Lorde's framework
+	Patriarchal model: maternity as "the only social power open to women," nurturance where women "pay perhaps too high a price." Feminist model: "Interdependency between women" as "redemptive," with "mutuality," "shared support," women nurturing each other to enable creative being, not service to others.
+	How does tokenism function as a master's tool?
+	Tokenism invites one Black lesbian to speak about "difference" while excluding Black women from panels on theory, existentialism, erotics. This compartmentalizes marginalized voices, suggesting they have "nothing to say" about "real" intellectual work. Maintains white feminist centrality while claiming inclusion through single representatives.
+	What does Lorde mean by "divide and conquer must become define and empower"?
+	The patriarchal lesson is "divide and conquer" - using difference to separate and weaken. Lorde's feminist transformation: "define and empower" - name differences precisely (not erase them) to build strength through "interdependence of mutual (nondominant) differences." Shifts difference from weapon to resource.
+	Why is it a "diversion of energies" for women of color to educate white women?
+	Lorde identifies this as "an old and primary tool of all oppressors to keep the oppressed occupied with the master's concerns." Just as women must educate men about women's existence, demanding women of color educate white women "is a tragic repetition of racist patriarchal thought" - centers white ignorance.
+	What does the essay say about interdependency versus independence?
+	Interdependency isn't dependence - it's "that security which enables us to descend into the chaos of knowledge and return with true visions of our future." Within "interdependence of mutual (nondominant) differences" we find "courage and sustenance to act where there are no charters." It enables risk-taking through solidarity.
+	Apply master's tools critique to current diversity and inclusion initiatives
+	D&I programs often tokenize by hiring one person of color per department, hosting annual heritage months, or creating separate "diversity" roles - replicating exclusion while claiming progress. Lorde's framework demands: Are marginalized people shaping core strategy? Do differences inform all theory/practice? Or just contained in special slots?
+	How does Lorde connect the personal and political?
+	She urges: "reach down into that deep place of knowledge inside herself and touch that terror and loathing of any difference that lives there. See whose face it wears." This internal work on our own fears of difference is how "the personal as the political can begin to illuminate all our choices."
+	What other systems could benefit from "define and empower" versus "divide and conquer"?
+	Disability justice: defining access needs empowers coalition versus dividing "deserving" from "undeserving." Labor organizing: defining class differences across race enables solidarity versus bosses dividing workers. Queer movements: defining specific experiences (trans, ace, bi) empowers versus assimilationist "we're all the same." Each transforms difference from liability to strength.
+	Why does Lorde quote de Beauvoir about "genuine conditions of our lives"?
+	Lorde uses de Beauvoir to ground her argument: "It is in the knowledge of the genuine conditions of our lives that we must draw our strength to live and our reasons for acting." The genuine conditions include "Racism and homophobia" as "real conditions of all our lives in this place and time" - not optional topics.
+	How does the essay challenge white feminist claims about "not knowing"?
+	Lorde exposes willful ignorance: "We do not know who to ask" is "the same cop-out" keeping Black women excluded. She challenges: "how come you haven't also educated yourselves about Black women and the differences between us—white and Black—when it is key to our survival as a movement?" Not knowing is a choice.
+	What does Lorde mean saying only narrow change is possible with master's tools?
+	Using patriarchal tools - tokenism, treating difference as threat, centering white women's experience - means "only the most narrow parameters of change are possible and allowable." You might "beat him at his own game" temporarily, but can't "bring about genuine change" because the tools reproduce the same exclusionary logic.
+	
+
+What does digitization fundamentally involve?
+	The world consisting of "analog phenomena infinite and unknowable" gets reduced to "the repeatable and the discrete" through "scanning, sampling, digitizing, transcribing, schematizing, programming." In this process "much of the world is left out or forgotten." As Parrish states, "a computer program is never itself the world."
+	How do tools reflect the values of their creators?
+	Parrish takes "as axiomatic" that "the values embedded in our tools end up being expressed in the artifacts that we make with them." Contemporary tools originate in the hacker era, creating challenges about "how to orient my students with regard to the mixed legacy of hacker culture" without accepting embedded questionable values.
+	Why is the Margaret Hamilton anecdote significant?
+	This story reveals how the hacker ethic "made it impossible for a brilliant woman to do her work." Hamilton - who developed Apollo program software - was trivialized by Levy as someone who "'showed up,'" was "'officially sanctioned,'" and "'complained.'" Parrish notes "Levy's framing trivializes Hamilton, her work, and her right to the facility."
+	What assumptions underlie the Hands-On Imperative?
+	Parrish identifies four presuppositions: "the world is a system and can be understood as being governed by rules or code," anything "can be fully described and understood by understanding its parts individually," systems can be "'imperfect'" implying perfection is possible, and "given sufficient access" and "'debugging'" a program can "perfectly model the world." This hubris convinced Nelson his modification would have no repercussions.
+	How does bias enter computer systems?
+	According to Parrish, "bias in computer systems exists because every computer program is by necessity written from a particular point of view." She challenges those who believe "they can eliminate bias from their systems if only they had more data." Programming as Western logical positivism wrongly assumes "the map becomes the territory."
+	What does Parrish mean by 'programming is forgetting'?
+	This is both "a methodology and a warning." The process takes "the world, which is infinitely variable, mysterious, and unknowable" and converts it "into procedures and data." The result: "The world, which consists of analog phenomena infinite and unknowable, is reduced to the repeatable and the discrete."
+	How does audio digitization demonstrate programming as forgetting?
+	Sound is "a continuous analog phenomenon" converted "into a sequence of discreet samples with quantized values." In this conversion, "information about the original signal is lost." You can increase fidelity, "but something from the original signal will always be lost." The programmer's role is making "decisions about how much of that information is lost," not eliminating loss.
+	List the problems Parrish identifies with Levy's hacker ethic tenets.
+	For unlimited access, Nelson gained it but "did not uphold that access for another person." For free information, The Midnight Computer Wiring Society worked in secret. For mistrusting authority, Nelson "took control of the computer for himself" - "putting it into different hands," not decentralizing. For judging by hacking, "Hamilton's access the computer was considered unimportant before her hacking could even be evaluated."
+	Why can't transcription ever be perfect?
+	Mary Bucholtz argues "there is no such thing as a perfect transcription." Spoken language includes "frequent false starts, repetitions, disfluencies, overlaps, interruptions." Parrish explains "interpretive choices are always made in the act of transcription that reflect the biases, the attitudes, and the needs of the transcriber." Transcription is "an act of forgetting."
+	What does the database schema example reveal about design choices?
+	A simple table with "an ID, a first name, a last name, and a gender" is actually "an engine for forgetting." It "requires a first and last name, which makes sense maybe in some Western cultures but not others." The "gender field defined here as an enumeration assumes that gender is inherent and binary," reflecting designer biases.
+	Summarize Parrish's critique of the 'discovery' narrative.
+	Parrish opens with Le Guin showing how "discovery" is "organized forgetting." Julius Caesar claimed "'It was not certain that Britain existed,' he says, 'until I went there.'" Le Guin asks "To whom was it not certain?" The danger lies in "fooling yourself into thinking you've discovered something new when in fact you've only overwritten reality with your own point of view."
+	How does Unicode demonstrate programming as forgetting?
+	The Unicode standard pursues "the ideal that text in any writing system can be fully represented and reproduced with a sequence of numbers." But "Unicode leaves out or forgets certain elements of what it's trying to model." The Han unification attempts collapsing "similar characters of Chinese origin from different writing systems into the same code point," yet "what the Unicode Consortium says is the same and what the speakers of the languages in question say are the same don't always match up."
+	What questions should replace 'access to computers should be unlimited'?
+	Instead of demanding unlimited access, Parrish proposes asking: "Who gets to use what I make? Who am I leaving out? How does what I make facilitate or hinder access?" This shift moves from asserting rights to examining consequences. Rather than Nelson gaining "total access" without considering he "did not uphold that access for another person," these questions center impact on others.
+	Compare how Parrish's ethic differs from Levy's regarding information.
+	Levy states "all information should be free," but Parrish asks: "What data am I using? Whose labor produced it and what biases and assumptions are built into it? Why choose this particular phenomenon for digitization or transcription? And what do the data leave out?" Where Levy's is absolute, Parrish's acknowledges data collection involves choices, labor, and inevitable exclusions.
+	Why does JPEG compression illustrate intentional forgetting?
+	Sometimes "forgetting isn't a side-effect of the digitization process but its express purpose." JPEG "converts an image into the results of a spectral analysis" and by "throwing out the higher frequency harmonics" the "original image can be approximated using less information." This allows faster downloads "and in the process, of course, certain details of the image are forgotten."
+	What role does context play in Parrish's philosophy?
+	The Hands-On Imperative "encourages an attitude in which a system is seen as just the sum of its parts." The problem? "The surrounding context, whether it's technological or social, is never taken into account." Nelson "believed himself to have a perfect understanding of the PDP-1, and failed to consider that it had other uses and other affordances outside of his own expectations."
+	How might Parrish's 'programming is forgetting' apply to machine learning systems?
+	Parrish critiques those who believe "they can eliminate bias from their systems if only they had more data, or if they had a more sophisticated algorithm." Applying her framework, ML training data involves choices about "what data am I using? Whose labor produced it and what biases and assumptions are built into it?" Every dataset is necessarily partial, "leaving out or forgetting" vast aspects of the world it claims to model.
+	What does Parrish mean by 'the world can't be debugged'?
+	In "the 'programming is forgetting' model, the world can't debugged." This opposes the Hands-On Imperative claiming "given sufficient access" and "'debugging'" makes "a computer program that perfectly models the world" possible. Instead, "what you can do is recognize and be explicit about your own point of view and the assumptions that you bring to the situation."
+	What are the two rescued principles from the original hacker ethic?
+	Parrish preserves: "You can create art and beauty on a computer. Computers can change your life for the better." She states: "I think if there's anything to be rescued from hacker culture it's these two sentences. These two sentences are the reason that I'm a computer programmer and that I'm a teacher in the first place."
+	Summarize Parrish's proposed new hacker ethic.
+	Rather than closed rules, Parrish offers questions. About access: "Who gets to use what I make? Who am I leaving out?" About information: "What data am I using? Whose labor produced it and what biases and assumptions are built into it?" About authority: "What systems of authority am I enacting through what I make?" About community: "What kind of community am I assuming?" These questions foster "understanding and being explicit about your biases about what you're leaving out."
+	
+
+Why did Warangal farmers switch from food crops to cotton?
+	Cotton was marketed as "white gold" promising high profits. Farmers abandoned their traditional paddy, pulses, millets, and vegetables for this cash crop. As Shiva documents, "the farmers were getting a good return on cotton" in years preceding 1997-98, luring small farmers into monoculture.
+	What actually happened when "miracle seeds" replaced farmers' varieties?
+	Seeds were "transformed into a costly input to be purchased" rather than "a free resource reproduced on the farm." Shiva traces how "from being a free resource...seeds were transformed into commodities." The 10,000-year practice of farmer seed-saving gave way to corporate dependence.
+	How did privatization change cotton growing in India?
+	Three major shifts occurred: mixed cultivation became monoculture based on external inputs; food security goals shifted to "growing cash crops for high profits"; and "public sector low-interest loans" were replaced by "high-interest private credit" tied to seed/chemical sales.
+	List the costs farmers faced beyond just buying seeds
+	Farmers spent Rs 1,500 on field preparation, Rs 1,500-2,000 on fertilizers, Rs 8,000-10,000 on pesticides alone, Rs 1,800-3,000 annual land lease, plus labor costs. Total input costs made cotton "demand a higher level of expenditure" than traditional crops.
+	What's the relationship between hybrid seeds and pesticide use?
+	Shiva explains "pesticide use is intimately linked to hybrid seeds" because hybrids "are more prone to pest and disease attack." Monocultures then "encourage pest build-up," creating a pesticide treadmill where farmers spent Rs 12,000/acre on chemicals that still failed.
+	How did the World Bank shape India's seed system?
+	The Bank gave loans totaling over $200 million (NSP I-III) explicitly to "develop state institutions" for certified seed production and later "make India's seed industry more 'market responsive'" by promoting "private sector, including multinational corporations" in seed production.
+	Who are the "moneylenders" in the cotton story?
+	They're "mostly pesticide dealers or shopowners" who took on roles as "pest management advisers," extended credit, "sold spurious pesticides," charged rates "higher than prevailing prices," and "recommended application of excessive doses." A debt trap integrated with input supply.
+	What does it mean that RCH-2 has "compact planting"?
+	This variety "grows horizontally and it has a closed canopy, which protects pests because the sun rays do not reach the base of the plant." The very seed design created ecological vulnerability - pest havens built into the plant architecture itself.
+	Categorize what farmers lost versus what corporations gained
+	Farmers lost: seed sovereignty, 10,000-year breeding knowledge, food security, biodiversity, economic independence, 100+ lives to suicide. Corporations gained: seed market projected Rs 60 billion, pesticide sales Rs 200 crore in Warangal alone, "expanding markets" through farmer dependency.
+	How does Shiva connect cotton colonization across history?
+	India went "from being the biggest producer of cotton and cotton textiles" to "the biggest market for textiles produced by the British industry." Now "cotton colonisation is not restricted to cotton textiles but goes deeper into the colonisation of the cotton seeds."
+	Summarize what "seeds of suicide" actually means in this context
+	The phrase captures how seed privatization created farmer dependency on expensive hybrids requiring costly pesticides. When crops failed in 1997-98, farmers owing Rs 35,000+ to private lenders committed suicide. "Seeds of suicide need to be replaced by seeds of prosperity," Shiva concludes.
+	What alternatives does the text propose to hybrid cotton monoculture?
+	Shiva points to "rejuvenating biodiversity in agriculture" as "the most sustainable solution." She advocates "indigenous cotton seeds" still available, "organic cotton production," and moving "away from poisonous pesticides." The solution is "liberation through seeds" - reclaiming diversity.
+	How do "miracle" narratives obscure actual agricultural knowledge?
+	The "miracle seeds-miracle spray" paradigm erased "millions of peasants and farmers" who "participated over thousands of years" in crop development. Traditional integrated pest management using "trap crops like castor and marigold" was displaced by chemical dependency marketed as "miracles."
+	What happened to bird populations and why does it matter?
+	Shiva notes "indiscriminate use of pesticides has reduced the bird population" which provided natural pest control. Birds, spiders, ladybird beetles, wasps, rats, frogs, snakes were "parasites and predators available in the field" - the pest solution killed by pesticide spraying itself.
+	Apply carrier bag theory to this case - what's the "weapon" vs "container"?
+	Hybrid seeds and pesticides function as "weapons" - spectacular, profit-generating, violence-inducing tools that occupy our imagination. The "carrier bag" is the 10,000-year practice of "farmers and peasants who produced their own seeds," sharing and storing diversity - invisible sustaining work.
+	What other contemporary examples fit this pattern of "miraculous" technologies creating dependency?
+	Smartphones requiring proprietary repairs, streaming services replacing owned media, cloud storage replacing local files, AI tools replacing human knowledge - all promise convenience while transferring ownership and control to corporations, creating treadmills of subscription dependency.
+	How would you explain this crisis to someone who thinks "farmers should just modernize"?
+	Farmers did "modernize" - they adopted RCH-2 hybrids, spent Rs 12,000/acre on pesticides, took loans for inputs. The "modern" system failed catastrophically. 100+ suicides reveal that "progress" narratives obscure extraction: whose knowledge gets erased, who profits, who bears risk.
+	Compare the two meanings of "seed" before and after the green revolution
+	Before: "seeds as sacred, as the critical element in the great chain of being." Seeds were "not bought and sold" but "exchanged as a free gift of nature." After: seeds became "a costly input to be purchased," protected by patents, non-renewable, controlled by "agri-chemical and seed corporations."
+	What does Shiva mean by calling this "the second cotton colonisation"?
+	The first colonisation converted India from cotton producer to textile market for Britain. The second goes deeper - "the colonisation of the cotton seeds" itself. "From being the country of origin and the centre of diversity, India is being rapidly reduced to dependence on imported cotton seeds."
+	Why does the text describe farmer suicides as resulting from "indebtedness" rather than "debt"?
+	The term emphasizes the structural trap: farmers borrowed Rs 35,000+ from private lenders charging 36-60% interest, bought inputs that failed, couldn't repay. "Indebtedness" captures the power relations - not a neutral loan but a web of dependency enforced by moneylender-pesticide dealers.
+	
+
+Who gets to speak for marginalized communities?
+	Spivak argues that "certain varieties of the Indian elite are at best native informants for first-world intellectuals interested in the voice of the Other." She insists that "the colonized subaltern subject is irretrievably heterogeneous," making simple representation impossible. The question of epistemic violence asks us to examine how power determines whose voice is heard and whose knowledge counts.
+	What does Spivak mean by 'epistemic violence'?
+	Spivak defines epistemic violence as "the remotely orchestrated, far-flung, and heterogeneous project to constitute the colonial subject as Other." This violence is "also the asymetrical obliteration of the trace of that Other in its precarious Subjectivity." It works through "ideological and scientific production" and "the institution of the law" to erase how subaltern subjects could occupy their own histories.
+	How does gender compound colonial oppression according to the text?
+	Spivak observes that "within the effaced itinerary of the subaltern subject, the track of sexual difference is doubly effected." She states directly: "If, in the context of colonial production, the subaltern has no history and cannot speak, the subaltern as female is even more deeply in shadow." The intersection creates layered erasure where women's voices are even more systematically erased than men's.
+	List the main forms of violence Spivak identifies in colonial knowledge production.
+	Spivak identifies several forms: epistemic violence through "ideological and scientific production," institutional violence through "the institution of the law," the "obliteration of the textual ingredients with which such a subject could cathect," and the violence of representation where intellectuals remain "complicit in the persistent constitution of Other as the Self's shadow." She also references "imperialist law and education supplementing an earlier economic text."
+	Why is recovering excluded histories so difficult?
+	Spivak explains that in constituting the colonial Other, "great care was taken to obliterate the textual ingredients with which such a subject could cathect, could occupy (invest?) its itinerary." The subaltern subject's consciousness has been systematically erased through colonial education and law. She asks: "can the subaltern speak?" - questioning whether recovery is even possible after such thoroughgoing epistemic violence.
+	What critique does Spivak make of Western intellectuals?
+	Spivak argues that "some of the most radical criticism coming out of the West today is the result of an interested desire to conserve the subject of the West, or the West as Subject." She observes that "contemporary French intellectuals" cannot "imagine the kind of Power and Desire that would inhabit the unnamed subject of the Other of Europe." Even progressive Western theory often reinscribes its own centrality while claiming to critique power.
+	Categorize the groups in Guha's stratification grid according to their power relations.
+	Spivak presents Guha's grid with: (1) "Dominant foreign groups" at the top, (2) "Dominant indigenous groups on the all-India level," (3) "Dominant indigenous groups at the regional and local levels" as the "buffer group," and (4) "The terms 'people' and 'subaltern classes' [are] used as synonymous" representing "the demographic difference between the total Indian population and all those whom we have described as the 'elite.'"
+	What is the relationship between consciousness and action in the text?
+	Spivak addresses "the concomitant question of the consciousness of the subaltern" through historiography, noting that "the sender - 'the peasant' - is marked only as a pointer to an irretrievable consciousness." She describes a "gap between interest and action in the intermediate group" where groups "acted in the interests of [all-India elites] and not in conformity to interests corresponding truly to their own social being." Consciousness can't be simply recovered from resistance acts.
+	Summarize Spivak's argument about elite historiography.
+	Spivak references Guha's critique that "The historiography of Indian nationalism has for a long time been dominated by elitism - colonialist elitism and bourgeois-nationalist elitism." Both credit either "British colonial rulers" or "Indian elite personalities" while erasing "the politics of the people." She argues this isn't about recovering "'the way things really were'" but understanding "how an explanation and narrative of reality was established as the normative one."
+	What makes the subaltern category 'heterogeneous' according to Spivak?
+	Spivak describes the subaltern through "identity-in-differential" - the category is "heterogeneous in its composition" with "ambiguities and contradictions." She notes "The same class or element which was dominant in one area . . . could be among the dominated in another." This creates "many ambiguities and contradictions in attitudes and alliances, especially among the lowest strata of the rural gentry."
+	How does the international division of labor shape intellectual work?
+	Spivak observes that the Western subject "belongs to the exploiters' side of the international division of labor." She asks about "the other side of the international division of labor from socialized capital, inside and outside the circuit of the epistemic violence of imperialist law and education" - can the subaltern speak from that position? Material conditions fundamentally shape what Western intellectuals can imagine.
+	What does Spivak mean by saying historiography rewrites 'conditions of impossibility as conditions of possibility'?
+	Spivak argues the Subaltern Studies group "articulates the difficult task of rewriting its own conditions of impossibility as the conditions of its possibility." Because the subaltern is constituted through erasure as "a deviation from an ideal" which is itself "defined as a difference from the elite," historians can't simply recover authentic consciousness. They must work within the very structures that created the category.
+	Identify the key differences between colonialist and nationalist elitism in Spivak's account.
+	According to Spivak citing Guha, both share "the prejudice that the making of the Indian nation . . . were exclusively or predominantly elite achievements." In "colonialist and neo-colonialist historiographies these achievements are credited to British colonial rulers, administrators, policies, institutions, and culture"; in "nationalist and neo-nationalist writings - to Indian elite personalities, institutions, activities and ideas." Both erase subaltern agency.
+	What political practice does Spivak suggest for intellectuals?
+	Spivak suggests "a possibility of political practice for the intellectual would be to put the economic 'under erasure,' to see the economic factor as irreducible as it reinscribes the social text, even as it is erased." Rather than claiming transparency, intellectuals must acknowledge complicity in epistemic violence and recognize how economic structures shape knowledge production without treating economics as "the final determinant or the transcendental signified."
+	How might Spivak's epistemic violence framework apply to contemporary technology platforms?
+	Spivak's concept of epistemic violence - "the remotely orchestrated, far-flung, and heterogeneous project to constitute the colonial subject as Other" - could analyze how platform algorithms constitute users as data subjects. Just as colonial systems "obliterate the textual ingredients with which such a subject could cathect," tech platforms might erase how marginalized users could control their digital identities. The question "can the subaltern speak?" becomes: can marginalized users meaningfully participate in platform governance?
+	What role does the 'buffer group' play in colonial power structures?
+	Spivak describes the third group as an "antre of situational indeterminacy" - a space "of in-betweenness." These "Dominant indigenous groups at the regional and local levels" created "ambiguities and contradictions in attitudes and alliances." The buffer group complicates simple elite/subaltern binaries because their position shifts by context, making resistance narratives more complex.
+	Why can't the historian simply recover authentic subaltern voice?
+	Spivak argues "for the 'true' subaltern group, whose identity is its difference, there is no unrepresentable subaltern subject that can know and speak itself." The "subject's itinerary has not been traced so as to offer an object of seduction to the representing intellectual." She insists historians must "suspend (as far as possible) the clamor of his or her own consciousness" to avoid freezing insurgency "into an 'object of investigation.'"
+	Summarize Spivak's critique of Foucault and Deleuze on representation.
+	Spivak critiques their claim that "the oppressed, if given the chance . . . can speak and know their conditions." She argues this applies only in "the First World, under the standardization and regimentation of socialized capital" and asks: "On the other side of the international division of labor from socialized capital . . . can the subaltern speak?" Their framework can't account for how colonial epistemic violence fundamentally constitutes the subaltern subject.
+	Compare how woman-as-figure differs from the subaltern in Spivak's argument.
+	Spivak notes "for the 'figure' of woman, the relationship between woman and silence can be plotted by women themselves; race and class differences are subsumed under that charge." However, "Subaltern historiography must confront the impossibility of such gestures." The subaltern category is "irretrievably heterogeneous" and more thoroughly erased, making self-representation structurally different from how women in general might address silence.
+	What is Spivak's answer to the question 'Can the subaltern speak?'
+	While Spivak doesn't give a simple yes/no answer, she demonstrates the question's complexity. She shows that "there is no unrepresentable subaltern subject that can know and speak itself" because of systematic epistemic violence. The "intellectual's solution is not to abstain from representation" but to recognize that "the subject's itinerary has not been traced." For "the subaltern as female" the silencing is "even more deeply in shadow." The question exposes how power constitutes who can be heard.
+

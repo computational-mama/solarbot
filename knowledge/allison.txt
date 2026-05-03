@@ -1,0 +1,162 @@
+My name’s Allison Parrish, and I have a little talk prepared here. The title here is on the screen, “Programming is Forgetting: Toward a new hacker ethic.” I love that word “toward,” because it instantly makes any talk feel super serious. So I’m just going to begin.
+
+Every practice, whether technical or artistic, has a history and a culture, and you can’t understand the tools without understanding the culture and vice versa. Computer programming is no different. I’m a teacher and a computer programmer, and I often find myself in the position of teaching computer programming to people who have never programmed a computer before. Part of the challenge of teaching computer programming is making the history and culture available to my students so they can better understand the tools I’m teaching them to use. 
+
+This talk is about about that process. And the core of the talk comes from a slide deck that I show my beginner programmers on the first day of class. But I wanted to bring in a few more threads, so be forewarned that this talk is also about bias in computer programs and about hacker culture. Maybe more than anything it’s a sort of polemic review of Steven Levy’s book Hackers: Heroes of the Computer Revolution, so be ready for that. The conclusions I reach in this talk might seem obvious to some of you, but I hope it’s valuable to see the path that I followed to reach those conclusions. 
+
+One of our finest methods of organized forgetting is called discovery. Julius Caesar exemplifies the technique with characteristic elegance in his Gallic Wars. “It was not certain that Britain existed,” he says, “until I went there.”
+
+To whom was it not certain? But what the heathen know doesn’t count. Only if godlike Caesar sees it can Britannia rule the waves.
+
+Only if a European discovered or invented it could America exist. At least Columbus had the wit, in his madness, to mistake Venezuela for the outskirts of Paradise. But he remarked on the availability of cheap slave labor in Paradise.
+Ursula K. Le Guin, “A Non-Euclidean View of California as a Cold Place to Be”
+
+So, the quote here is from an amazing essay called “A Non-Euclidean View of California as a Cold Place to Be” by one of my favorite authors, Ursula K. Le Guin. It is about the dangers of fooling yourself into thinking you’ve discovered something new when in fact you’ve only overwritten reality with your own point of view.
+
+
+So let’s begin. This is Hackers: Heroes of the Computer Revolution by Steven Levy. This book was first published in 1984. And in this book Steven Levy identifies the following as the components of the hacker ethic.
+
+Access to computers should be unlimited and total.
+All information should be free.
+Mistrust authority—promote decentralization.
+Hackers should be judged by their hacking, not bogus criteria such as degrees, age, race or position.
+You can create art and beauty on a computer.
+Computers can change your life for the better.
+Now, Levy defines hackers as computer programmers and designers who regard computing as the most important thing in the world. And his book is not just a history of hackers but also a celebration of them. Levy makes his attitude toward hackers and their ethic clear through the subtitle he chose for the book, “Heroes of the Computer Revolution.” And throughout the book doesn’t hesitate to extol the virtues of this hacker ethic.
+
+The book concludes with this quote, this bombastic quote, from Lee Felsenstein.
+
+“It’s a very fundamental point of, you might say, the survival of humanity, in a sense that you can have people [merely] survive, but humanity is something that’s a little more precious, a little more fragile. So that to be able to defy a culture which states that ‘Thou shalt not touch this,’ and to defy that with one’s own creative powers is…the essence.”
+
+The essence, of course, of the Hacker Ethic.
+Hackers, p. 452
+
+And that last sentence is Levy’s. He’s telling us that adherence to the hacker ethic is not just virtuous, but it’s what makes life worthwhile, that the survival of the human race is dependent on following this ethic. 
+
+Hackers was reprinted in a 25th anniversary edition by O’Reilly in 2010, and despite the unsavory connotations of the word hacker—like the criminal connotations of it—hacker culture of course is still alive and well today. Some programmers call themselves hackers, and a glance at any tech industry job listing will prove that hackers are still sought after. Contemporary reviewers of Levy’s book continue to call the book a classic, an essential read for learning to understand the mindset of that mysterious much-revered pure programmer that we should all strive to be like. 
+
+
+Hackers the book relates mostly events from the 1950s, 60s, and 70s. I was born in 1981, and as a young computer enthusiast I quickly became aware of my unfortunate place in the history of computing. I thought I was born in the wrong time. I would think to myself I was born long after the glory days of hacking and the computer revolution. So when I was growing up I wished I’d been there during the events that Levy relates. Like I wish that I’d been been able to play Spacewar! in the MIT AI lab. I wished that I could’ve attended the meetings of the Homebrew Computer Club with the Steves, Wozniak and Jobs. Or work at Bell Labs with Kernighan and Ritchie hacking on C in Unix. I remember reading and rereading Eric S. Raymond’s Jargon File (Many of you have probably seen this. I hope some of you have seen that list.) on the Web as a teenager and consciously adopting it as my own culture and taking the language from the Jargon File and including it in my own language.
+
+And I wouldn’t be surprised to find out that many of us here today like to see our work as a continuation of say the Tech Model Railroad Club or the Homebrew Computer Club, and certainly the terminology and the values of this conference, like open source for example, have their roots in that era. As a consequence it’s easy to interpret any criticism of the hacker ethic—which is what I’m about to do—as a kind of assault. I mean, look at this list again, right. 
+
+
+To me, even though I’m about to launch into a polemic about these things, they still make sense in an intuitive and visceral way. How could any of these things be bad? 
+
+But, the tenets and the effects of the hacker ethic deserve to be reexamined. In fact the past few years have been replete with critiques of hacker culture, especially as hacker culture has sort of evolved into the tech industry. And I know that many of us have taken those critiques to heart, and in some sense I see my own process of growing up and becoming an adult as being the process of recognizing the flaws in this ethic, and its shortcomings, and becoming disillusioned with it.
+
+But it wasn’t until I recently actually read Levy’s Hackers that I came to a full understanding that the problems with the hacker ethic lay not simply in the failure to execute its principles fully, but in some kind of underlying philosophy of the ethic itself. And so to illustrate, I want to relate an anecdote from the book. 
+
+This anecdote relates an event that happened in the 1960s in which a hacker named Stewart Nelson decided to rewire MIT’s PDP‑1. The PDP‑1 was a computer shared between multiple departments, and because only one person could use the computer at a time, its use was allocated on an hourly basis. You had to sign up for it. Nelson, along with a group of onlookers who called themselves “The Midnight Computer Wiring Society” decided to add a new opcode the computer by opening it, fusing a couple of diodes, then reassembling it to an apparent pristine state. This was done at night, in secret, because university had said that tampering with computers was against the rules. And the following quote tells the tale of what came next. 
+
+The machine was taken through its paces by the hackers that night, and worked fine. But the next day an Officially Sanctioned User named Margaret Hamilton showed up on the ninth floor to work on something called a Vortex Model for a weather-simulation project she was working on… [T]he Vortex program at that time was a very big program for her. 
+
+The assembler that Margaret Hamilton used with her Vortex program was not the hacker-written MIDAS assembler, but the DEC-supplied DECAL system that the hackers considered absolutely horrid. So of course Nelson and the MCWS, when testing the machine the previous night, had not used the DECAL assembler. They had never even considered the possibility that the DECAL assembler accessed the instruction code in a different manner than MIDAS, a manner that was affected to a greater degree by the slight forward voltage drop created by the addition of two diodes between the add line and the store line. 
+
+(I probably should’ve cut out more of this quote. This is the hardware in my talk right here.)
+
+Margaret Hamilton, of course, was unaware that the PDP‑1 had undergone surgery the previous night. So she did not immediately know the reason why her Vortex program…broke. […] Though programs often did that for various reasons, this time Margaret Hamilton complained about it, and someone looked into why, and someone else fingered the Midnight Computer Wiring Society. So there were repercussions. Reprimands.
+Hackers, pp. 88–89
+
+Levy clearly views this anecdote as an example of the hacker ethic at work. If that’s the case, the hacker ethic in this instance has made it impossible for a brilliant woman to do her work, right. For Levy, the story is passed off as a joke but when I first read it I got angry.
+
+A young Margaret Hamilton, smiling, propping up a stack of paper as tall as herself
+The Margaret Hamilton mentioned in this story, by the way, is in case you were curious the same Margaret Hamilton who would go on to develop the software for the Apollo program and the Skylab program that landed astronauts on the moon. She’s like a superstar. The mention of Margaret Hamilton in this passage is one of maybe three instances in the entire book in which a woman appears who is not introduced as the relative or romantic interest of a man. And even in this rare instance, Levy’s framing trivializes Hamilton, her work, and her right to the facility. She was “a beginner programmer” who was “officially sanctioned” but also just “showed up.” And she “complained” about it, leading to repercussions and reprimands. Levy is all but calling her a nag.
+
+The first four points of Levy's hacker ethic, text crossed out.
+So. If the hacker ethic is good, how could it have produced this clearly unfair and horrible and angry-making situation? So I’m going to look at a few of the points from Levy’s summary of the hacker ethic to see how it produced or failed to prevent the Margaret Hamilton situation here. 
+
+So first of all the idea that access to computers should be unlimited and total. The hacker Nelson succeeded in gaining total access. He was enacting this part of the ethic. But what he didn’t consider is in the process he did not uphold that access for another person. Another person was denied access by his complete access.
+
+Two, all information should be free. No one who really believes in the idea that all information should be free would start a secret organization that works only at night called The Midnight Computer Rewiring Society? Information about their organization clearly was not meant to be free, it was meant to be secret.
+
+Three, the mistrust of authority. The “mistrust of authority” in this instance was actually a hacker coup. Nelson took control of the computer for himself, which wasn’t decentralizing authority, it was just putting it into different hands.
+
+Four, hackers should be judged by their hacking, not bogus criteria such as degrees, age, race, or position. Of course, Hamilton’s access the computer was considered unimportant before her hacking could even be evaluated. And as a sidenote it’s interesting to note that gender is not included among the bogus criteria that Levy lists. That may be neither here nor there.
+
+Anyway, the book is replete with examples like this. Just like every page, especially in the first half, is just like some hackers being awful and then Levy excusing them because they’re following the all-important hacker ethic.
+
+So after reading this I thought, this isn’t what I want my culture to be. And then I asked myself, given that I grew up with the idea of the hacker ethic being all-important, what assumptions and attitudes have I been carrying with myself because of my implicit acceptance of those values? 
+
+So, many of the tools that we use today in the form of hardware, operating systems, applications, programming languages, even our customs and culture, originate in this era. I take it as axiomatic for this discussion that the values embedded in our tools end up being expressed in the artifacts that we make with them. I’m not a historian, but I am an educator, and given the pervasiveness of these values, I find myself constantly faced with the problem of how to orient my students with regard to the mixed legacy of hacker culture. How do I go about contextualizing the practice of programming without taking as a given the sometimes questionable values embedded within it?
+
+One solution is to propose a counterphilosophy, which is what I’m going to do in just a second. But first I think I found the philosophical kernel of the hacker ethic that makes me uncomfortable. Levy calls it the Hands-On Imperative. Here’s how he explains it, and I’ll talk about this in a second. 
+
+Hackers believe that essential lessons can be learned about the systems—about the world—from taking things apart, seeing how they work, and using this knowledge to create new and even more interesting things. They resent any person, physical barrier, or law that tries to keep them from doing this.
+
+This is especially true when a hacker wants to fix something that (from his point of view) is broken or needs improvement. Imperfect systems infuriate hackers, whose primal instinct is to debug them.
+Hackers, p. 28
+
+Hands-on of course is a phrase that has immediate incredibly positive connotations. And if you have a choice, obviously if you have a choice between hands-on and not hands-on, you’re probably going to choose hands-on. And so I admit that criticism of something called “The Hands-On Imperative” seems counterintuitive. And this is kind of I think the subtlest and most abstract part of the talk, and the part that I’m least sure of so thanks for sticking with me through this. But if you kind of unwind the Hands-On Imperative, you can pluck out some presuppositions from it. 
+
+One is that the world is a system and can be understood as being governed by rules or code. 
+
+Two, anything can be fully described and understood by understanding its parts individually—divorced from their original context.
+
+Three, systems can be “imperfect”—which implies that a system can also be made perfect.
+
+And four, therefore, given sufficient access (potentially obtained without permission)—and sufficient “debugging”—it’s possible to make a computer program that perfectly models the world.
+
+So, the hubris inherent in the Hands-On Imperative is what convinced Stewart Nelson that his modification of the PDP‑1 would have no repercussions. He believed himself to have a perfect understanding of the PDP‑1, and failed to consider that it had other uses and other affordances outside of his own expectations. The Hands-On Imperative in some encourages an attitude in which a system is seen as just the sum of its parts. The surrounding context, whether it’s technological or social, is never taken into account.
+
+But that’s just a small example of this philosophy in action. There’s a big discussion in many of the fields that I’m involved with right now about bias in algorithms, and bias in statistical models and data. And there’s always one contingent in that discussion of scientists and programmers who believe that they can eliminate bias from their systems if only they had more data, or if they had a more sophisticated algorithm to analyze the data with. And following this philosophy, programming is an extension of sort of Western logical positivism, which says you start with a blank slate, and with enough time and application, adding fact upon fact and rule upon rule, the map becomes the territory and you end up with a perfect model of the world.
+
+Programming is forgetting
+Of course, programming doesn’t work like that. Knowledge doesn’t work like that. Nothing works like that. Bias in computer systems exists because every computer program is by necessity written from a particular point of view. So what I tell my students in introductory programming classes is this: programming is forgetting. And this is both a methodology and a warning. 
+
+
+The process of computer programming is taking the world, which is infinitely variable, mysterious, and unknowable (if you’ll excuse a little turn towards the woo in this talk) and turning it into procedures and data. And we have a number of different names for this process: scanning, sampling, digitizing, transcribing, schematizing, programming. But the result is the same. The world, which consists of analog phenomena infinite and unknowable, is reduced to the repeatable and the discrete.
+
+In the process of programming, or scanning or sampling or digitizing or transcribing, much of the world is left out or forgotten. Programming is an attempt to get a handle on a small part of the world so we can analyze and reason about it. But a computer program is never itself the world.
+
+A pie chart headed "digitizing reality" with two sections: the great majority labeled "forgotten" and a very small sliver "digitized"
+So I just want to give some examples of this. This is…reality is the whole pie chart, and then our digitized version of it’s that little sliver. And depending on how seriously you adhere to this philosophy, that sliver is like, infinitely small. We can only ever get like—we don’t know how much of reality we’re modeling in our systems. 
+
+
+So I just want to show some examples to drive this point home of computer programming being a kind of forgetting. A good example is the digitization of sound. Sound of course is a continuous analog phenomenon caused by vibrations of air pressure which our ears turn into nerve impulses in the brain. The process of digitizing audio captures that analog phenomenon and converts it into a sequence of discreet samples with quantized values. In the process, information about the original signal is lost. You can increase the fidelity by increasing the sample rate or increasing the amount of data stored per sample, but something from the original signal will always be lost. And the role of the programmer is to make decisions about how much of that information is lost and what the quality of that loss is, not to eliminate the loss altogether.
+
+
+
+
+Sometimes forgetting isn’t a side-effect of the digitization process at all. This is JPEG compression, for example. Sometimes forgetting isn’t a side-effect of the digitization process but its express purpose. So lossy compression like JPEG is a good example of this. The JPEG compression algorithm converts an image into the results of a spectral analysis of its component chunks, and by throwing out the higher frequency harmonics from the spectral analysis, the original image can be approximated using less information, which allows it to be downloaded faster. And in the process, of course, certain details of the image are forgotten.
+
+
+Databases are another good example of programming as a kind forgetting. And maybe this is a little bit less intuitive. This is a table schema written in SQL, clearly intended to create a table (If you’re not familiar with database design, a table is sort of like a single sheet in a spreadsheet program.) with four columns, an ID, a first name, a last name, and a gender. So, this database schema looks innocent enough. If you’ve done any computer programming, you’ve probably made a table that looks like this at some point, even if you just made a spreadsheet or a sign-up sheet for something. But this is actually an engine for forgetting. The table is intended to represent individual human beings, but of course it only captures a small fraction of the available information about a person, throwing away the rest.
+
+This particular database schema, in my opinion, does a really poor job of representing people, and ends up reflecting the biases of the person who made it in a pretty severe way. It requires a first and last name, which makes sense maybe in some Western cultures but not others where names maybe have a different number of components or the terminology “first and last name” don’t apply to the parts of the name. The gender field defined here as an enumeration assumes that gender is inherent and binary, and that knowing someone’s gender is on the same level of the hierarchy for the purposes of identifying them as knowing the person’s name. And that may or may not be a useful abstraction for whatever purposes the database is geared for, but it’s important remember that it’s exactly that—it’s an abstraction.
+
+So, the tendency to mistake the discrete map for the analogue territory is particularly strong when it comes to language. And that’s the main focus of my practice is I do computer-generated poetry, so I think a lot about computers and language. The tendency to mistake— Or, in my experience, most people conceptualize spoken language as consisting primarily of complete grammatical sentences said aloud in turns, bounded by easily-distinguished greetings and farewells. And that we can take these exchanges—like a conversation for example—and given sufficient time and effort we can perfectly capture conversation in a transcription, right. 
+
+
+This slide is from a paper by Mary Bucholtz, a linguist. The paper is called “The Politics of Transcription.” And the paper talks about how anyone who has actually tried to transcribe a conversation knows that spoken language consists of frequent false starts, repetitions, disfluencies, overlaps, interruptions, utterances that are incoherent or inaudible or even purposefully ambiguous. In the papers, she also argues that there is no such thing as a perfect transcription. That interpretive choices are always made in the act of transcription that reflect the biases, the attitudes, and the needs of the transcriber. In other words a transcription is an act of forgetting, of throwing away part of a phenomenon in order to produce an artifact more amenable to analysis. 
+
+This is from a transcription of I think a court proceeding having to do with the Rodney King case in the 90s. And you can see on the left is a reporter’s transcript of that, and on the right is a linguist’s transcript of it, and they’re very very different. But even the linguist’s transcription isn’t perfect. One thing I’d like to have my programming students do is read this paper and then try to transcribe a conversation, just to see the difference between how they think a conversation works and how it actually works.
+
+
+And of course the problem with language isn’t just about conversation. The process of converting written text to digital text has its own set of problems. This is an example of an optical character algorithm that’s designed to be accurate for some kinds of English text, but it fails to work properly when it encounters say the long s of the 1700s. So it says “inoffenſive manners” and the OCR algorithm thinks it says “inoffenfive manners.” Or there’s an obscure ligature in there which it interprets as a parenthesis and a 5. So the point of this is that the real world always contains something unexpected that throws a wrench into the works of the procedure.
+
+Another example of that, the Unicode standard is devoted to the ideal that text in any writing system can be fully represented and reproduced with a sequence of numbers. So we can take a text in a world, convert it to a series of Unicode code points, and then we have accurately represented that text. So this idea might make intuitive sense— It makes especially intuitive sense to like, a classic hacker who’s used to working with ASCII text. But of course just like any other system of digitization, Unicode leaves out or forgets certain elements of what it’s trying to model. 
+
+
+So this is one controversial example of Unicode’s forgetfulness. It’s called the Han unification, in which the Unicode standard is attempting to collapse similar characters of Chinese origin from different writing systems into the same code point. Of course what the Unicode Consortium says is the same and what the speakers of the languages in question say are the same don’t always match up. And the disagreements about that continue among the affected parties, delaying and complicating adoption of the standard. You can see here the Unicode standard wants to say that all of these characters are the same. But you can see that actually as they’re used by speakers of these different languages, they’re not the same at all. So there’s a difference between the abstraction and the reality.
+
+
+This is a kind of cool, interesting example. This is a system of transcribing dance and movement called Labanotation. So you could potentially transcribe somebody’s movements or a dance piece into this particular transcription system. And I bring this up to show that what I’m trying to say is not that transcription or digitization or programming or designing hardware with a particular purpose is always a bad thing. It can have a particular purpose. This system, for example, facilitates the repetition and analysis of an action so that patterns can be identified, formalized, and measured. 
+
+Toward a new hacker ethic
+So here we go. Toward a new hacker ethic. So, the approach in which programmers acknowledge that programming is in some sense about leaving something out is opposed to the Hands-On Imperative as expressed by Levy. Programs aren’t models of the world constructed from scratch but takes on the world, carefully carved out of reality. It’s a subtle but important difference. In the “programming is forgetting” model, the world can’t debugged. But what you can do is recognize and be explicit about your own point of view and the assumptions that you bring to the situation.
+
+So, the term “hacker” still has high value in tech culture. And it’s a privilege…if somebody calls you a hacker that’s kind of like a compliment. It’s a privilege to be able to be called a hacker, and it’s reserved for the highest few. And to be honest, I personally could take or leave the term. I’m not claiming to be a hacker or to speak on behalf of hackers. But what I want to do is I want to foster a technology culture in which a high value is placed on understanding and being explicit about your biases about what you’re leaving out, so that computers are used to bring out the richness of the world instead of forcibly overwriting it.
+
+
+So to that end I’m proposing a new hacker ethic. Of course proposing a closed set of rules for virtuous behavior would go against the very philosophy I’m trying to advance, so my ethic instead takes the form of questions that every hacker should ask themselves while they’re making programs and machines. So here they are.
+
+Instead of saying access to computers should be unlimited and total, we should ask “Who gets to use what I make? Who am I leaving out? How does what I make facilitate or hinder access?”
+
+Instead of saying all information should be free, we could ask “What data am I using? Whose labor produced it and what biases and assumptions are built into it? Why choose this particular phenomenon for digitization or transcription? And what do the data leave out?”
+
+Instead of saying mistrust authority, promote decentralization, we should ask “What systems of authority am I enacting through what I make? What systems of support do I rely on? How does what I make support other people?”
+
+And instead of saying hackers should be judged by their hacking, not bogus criteria such as degrees, age, race, or position, we should ask “What kind of community am I assuming? What community do I invite through what I make? How are my own personal values reflected in what I make?”
+
+So you might have noticed that there were two final points—the two last points of Levy’s hacker ethics that I left alone, and those are these: You can create art and beauty on a computer. Computers can change your life for the better. I think if there’s anything to be rescued from hacker culture it’s these two sentences. These two sentences are the reason that I’m a computer programmer and that I’m a teacher in the first place. And I believe them and I know you believe them, and that’s why we’re here together today. Thank you.
