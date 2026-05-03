@@ -940,7 +940,8 @@ if __name__ == "__main__":
 
     # read UI_BACKGROUND_COLOR from environment variable (hex or r,g,b)
     _bg_env = os.getenv("UI_BACKGROUND_COLOR", "#FFF5D1")
-    UI_BACKGROUND_COLOR = ColorUtils.get_rgb255_from_any(_bg_env) + (255,)
+    _bg_rgb = ColorUtils.get_rgb255_from_any(_bg_env) or (255, 245, 209)
+    UI_BACKGROUND_COLOR = _bg_rgb + (255,)
 
     # start render thread
     render_thread = RenderThread(
