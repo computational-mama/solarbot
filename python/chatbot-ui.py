@@ -77,7 +77,6 @@ class RenderThread(threading.Thread):
         self.whisplay = whisplay
         self.font_path = font_path
         self.fps = fps
-
         self.render_init_screen()
         # Clear logo after 1 second and start running loop
         time.sleep(1)
@@ -219,7 +218,7 @@ class RenderThread(threading.Thread):
             header_height = 88 + 10  # header + margin
             # create a cream background image for header
             image = Image.new(
-                "RGBA", (self.whisplay.LCD_WIDTH, header_height), self.bg_color
+                "RGBA", (self.whisplay.LCD_WIDTH, header_height), (255, 245, 209, 255)
             )
             draw = ImageDraw.Draw(image)
 
@@ -312,7 +311,7 @@ class RenderThread(threading.Thread):
             text_bg_image = Image.new(
                 "RGBA",
                 (self.whisplay.LCD_WIDTH, text_area_height),
-                self.bg_color,
+                (255, 245, 209, 255),
             )
             text_draw = ImageDraw.Draw(text_bg_image)
             animation_active = self.render_main_text(
@@ -405,7 +404,7 @@ class RenderThread(threading.Thread):
             show_text_image = Image.new(
                 "RGBA",
                 (self.whisplay.LCD_WIDTH, render_y + len(display_lines) * line_height),
-                self.bg_color,
+                (255, 245, 209, 255),
             )
             show_text_draw = ImageDraw.Draw(show_text_image)
             for line in display_lines:
@@ -938,16 +937,9 @@ if __name__ == "__main__":
     # read CUSTOM_FONT_PATH from environment variable
     custom_font_path = os.getenv("CUSTOM_FONT_PATH", None)
 
-    # read UI_BACKGROUND_COLOR from environment variable (hex or r,g,b)
-    _bg_env = os.getenv("UI_BACKGROUND_COLOR", "#FFF5D1")
-    _bg_rgb = ColorUtils.get_rgb255_from_any(_bg_env) or (255, 245, 209)
-    UI_BACKGROUND_COLOR = _bg_rgb + (255,)
-
     # start render thread
     render_thread = RenderThread(
-        whisplay,
-        custom_font_path or "EBGaramond-Medium.ttf",
-        fps=30,
+        whisplay, custom_font_path or "EBGaramond-Medium.ttf", fps=30
     )
     render_thread.start()
     start_socket_server(render_thread, host="0.0.0.0", port=12345)
