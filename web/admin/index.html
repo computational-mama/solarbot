@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Solarbot Admin</title>
+  <style>
+    :root { --bg: #0b1016; --panel: #0f1724; --accent: #44f28a; --text: #e4ecf4; --muted: #7f8a99; --danger: #f26a44; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 32px 16px; }
+    h1 { font-size: 20px; color: var(--accent); margin-bottom: 8px; }
+    .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 32px; }
+    section { background: var(--panel); border-radius: 14px; padding: 24px; margin-bottom: 24px; border: 1px solid rgba(255,255,255,0.06); }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 16px; }
+    .env-row { display: grid; grid-template-columns: 1fr 2fr 36px; gap: 8px; margin-bottom: 8px; }
+    input, textarea { width: 100%; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
+    input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    button { cursor: pointer; border: none; border-radius: 8px; font-size: 13px; padding: 8px 16px; transition: opacity .15s; }
+    button:hover { opacity: .85; }
+    .btn-primary { background: var(--accent); color: #000; font-weight: 600; }
+    .btn-danger { background: var(--danger); color: #fff; width: 36px; height: 36px; padding: 0; font-size: 16px; }
+    .btn-sm { background: rgba(255,255,255,0.08); color: var(--text); padding: 6px 12px; }
+    .file-list { list-style: none; }
+    .file-list li { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 14px; }
+    .file-list li:last-child { border-bottom: none; }
+    .empty { color: var(--muted); font-size: 13px; }
+    .log { background: #000; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; color: #aaa; white-space: pre-wrap; max-height: 220px; overflow-y: auto; margin-top: 12px; display: none; }
+    .token-row { display: flex; gap: 8px; margin-bottom: 20px; }
+    .token-row input { max-width: 280px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #uploadForm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #fileInput { width: auto; flex: 1; }
+    .status { font-size: 12px; color: var(--accent); margin-top: 8px; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <h1>Solarbot Admin</h1>
+  <p class="subtitle">Manage knowledge files and configuration. Restart the bot after saving changes.</p>
+
+  <section>
+    <h2>Auth Token</h2>
+    <div class="token-row">
+      <input id="token" type="password" placeholder="ADMIN_TOKEN (leave blank if not set)" />
+      <button class="btn-sm" onclick="loadAll()">Connect</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Knowledge Files</h2>
+    <form id="uploadForm">
+      <input id="fileInput" type="file" multiple />
+      <button class="btn-primary" type="submit">Upload</button>
+    </form>
+    <p class="status" id="uploadStatus"></p>
+    <ul class="file-list" id="fileList"><li class="empty">—</li></ul>
+    <div style="margin-top:16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button class="btn-primary" onclick="reindex()">Re-index now</button>
+      <span style="font-size:12px;color:var(--muted)">Runs <code>yarn index</code> — output streams below</span>
+    </div>
+    <div class="log" id="reindexLog"></div>
+  </section>
+
+  <section>
+    <h2>Environment Config (.env)</h2>
+    <div id="envRows"></div>
+    <div class="row" style="margin-top:12px;">
+      <button class="btn-sm" onclick="addEnvRow('','')">+ Add key</button>
+      <button class="btn-primary" onclick="saveEnv()">Save .env</button>
+    </div>
+    <p class="status" id="envStatus"></p>
+  </section>
+
+<script>
+  const BASE = `http://${location.hostname}:18780`;
+
+  function headers() {
+    const t = document.getElementById('token').value.trim();
+    return t ? { Authorization: `Bearer ${t}` } : {};
+  }
+
+  async function loadAll() {
+    await Promise.all([loadFiles(), loadEnv()]);
+  }
+
+  // ── Knowledge files ──────────────────────────────────────────────
+
+  async function loadFiles() {
+    const r = await fetch(`${BASE}/knowledge`, { headers: headers() });
+    if (!r.ok) return;
+    const { files } = await r.json();
+    const ul = document.getElementById('fileList');
+    ul.innerHTML = files.length
+      ? files.map(f => `<li><span>${f}</span><button class="btn-danger" onclick="deleteFile('${f}')">✕</button></li>`).join('')
+      : '<li class="empty">No files yet.</li>';
+  }
+
+  document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('uploadStatus');
+    const input = document.getElementById('fileInput');
+    const files = input.files;
+    if (!files.length) return;
+    status.textContent = 'Uploading…';
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append('file', file);
+      await fetch(`${BASE}/knowledge/upload`, { method: 'POST', headers: headers(), body: fd });
+    }
+    status.textContent = `Uploaded ${files.length} file(s).`;
+    input.value = '';
+    loadFiles();
+  });
+
+  async function deleteFile(name) {
+    if (!confirm(`Delete ${name}?`)) return;
+    await fetch(`${BASE}/knowledge/${encodeURIComponent(name)}`, { method: 'DELETE', headers: headers() });
+    loadFiles();
+  }
+
+  async function reindex() {
+    const log = document.getElementById('reindexLog');
+    log.style.display = 'block';
+    log.textContent = 'Starting reindex…\n';
+    const r = await fetch(`${BASE}/reindex`, { method: 'POST', headers: headers() });
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      log.textContent += dec.decode(value);
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+
+  // ── .env editor ─────────────────────────────────────────────────
+
+  async function loadEnv() {
+    const r = await fetch(`${BASE}/env`, { headers: headers() });
+    if (!r.ok) return;
+    const vars = await r.json();
+    const container = document.getElementById('envRows');
+    container.innerHTML = '';
+    for (const [k, v] of Object.entries(vars)) addEnvRow(k, v);
+  }
+
+  function addEnvRow(k, v) {
+    const row = document.createElement('div');
+    row.className = 'env-row';
+    row.innerHTML = `
+      <input placeholder="KEY" value="${escHtml(k)}" />
+      <input placeholder="value" value="${escHtml(v)}" />
+      <button class="btn-danger" onclick="this.parentElement.remove()">✕</button>`;
+    document.getElementById('envRows').appendChild(row);
+  }
+
+  async function saveEnv() {
+    const rows = document.querySelectorAll('.env-row');
+    const vars = {};
+    for (const row of rows) {
+      const [kInput, vInput] = row.querySelectorAll('input');
+      if (kInput.value.trim()) vars[kInput.value.trim()] = vInput.value;
+    }
+    await fetch(`${BASE}/env`, { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(vars) });
+    document.getElementById('envStatus').textContent = 'Saved. Restart the bot for changes to take effect.';
+  }
+
+  function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+  loadAll();
+</script>
+</body>
+</html>

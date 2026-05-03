@@ -158,6 +158,25 @@ Then open `http://localhost:17880` after starting the bot. The browser handles a
 
 ---
 
+## Admin UI
+
+A browser-based admin panel lets you upload knowledge files, trigger reindexing, and edit `.env` config without touching the Pi over SSH.
+
+Enable it by adding to `.env`:
+
+```env
+WHISPLAY_ADMIN_PORT=18780
+ADMIN_TOKEN=your_secret_token   # recommended if exposing externally
+```
+
+Then open `http://<pi-ip>:18780`. To share it over the internet, tunnel the port with cloudflared:
+
+<!--```bash
+cloudflared tunnel --url http://localhost:18780
+```-->
+
+---
+
 ## Making changes
 
 ### Change the personality / system prompt
