@@ -216,9 +216,9 @@ class RenderThread(threading.Thread):
         else:
             current_image = None
             header_height = 88 + 10  # header + margin
-            # create a black background image for header
+            # create a cream background image for header
             image = Image.new(
-                "RGBA", (self.whisplay.LCD_WIDTH, header_height), (255, 255, 255, 255)
+                "RGBA", (self.whisplay.LCD_WIDTH, header_height), (255, 245, 209, 255)
             )
             draw = ImageDraw.Draw(image)
 
@@ -311,7 +311,7 @@ class RenderThread(threading.Thread):
             text_bg_image = Image.new(
                 "RGBA",
                 (self.whisplay.LCD_WIDTH, text_area_height),
-                (255, 255, 255, 255),
+                (255, 245, 209, 255),
             )
             text_draw = ImageDraw.Draw(text_bg_image)
             animation_active = self.render_main_text(
@@ -483,7 +483,9 @@ class RenderThread(threading.Thread):
         )
 
         # Draw animation frame or fall back to recognizing animation
-        anim_frame = self._get_animation_frame(status) or self._get_animation_frame("recognizing")
+        anim_frame = self._get_animation_frame(status) or self._get_animation_frame(
+            "recognizing"
+        )
         if anim_frame:
             size = emoji_font_size
             scaled = anim_frame.resize((size, size), Image.LANCZOS)
