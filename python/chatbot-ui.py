@@ -482,24 +482,14 @@ class RenderThread(threading.Thread):
             draw, image, current_status, status_font, (whisplay.CornerHeight, 0)
         )
 
-        # Draw animation frame or fall back to emoji
-        anim_frame = self._get_animation_frame(status)
+        # Draw animation frame or fall back to recognizing animation
+        anim_frame = self._get_animation_frame(status) or self._get_animation_frame("recognizing")
         if anim_frame:
             size = emoji_font_size
             scaled = anim_frame.resize((size, size), Image.LANCZOS)
             paste_x = (image_width - size) // 2
             paste_y = status_font_size + 8
             image.paste(scaled, (paste_x, paste_y), scaled)
-        else:
-            emoji_bbox = emoji_font.getbbox(current_emoji)
-            emoji_w = emoji_bbox[2] - emoji_bbox[0]
-            TextUtils.draw_mixed_text(
-                draw,
-                image,
-                current_emoji,
-                emoji_font,
-                ((image_width - emoji_w) // 2, status_font_size + 8),
-            )
 
         # Draw battery icon
         status_icon_context = {
