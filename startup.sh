@@ -59,8 +59,8 @@ Group=audio
 SupplementaryGroups=audio video gpio
 
 # Use the dynamic Home Directory
-WorkingDirectory=$USER_HOME/whisplay-ai-chatbot
-ExecStart=/bin/bash $USER_HOME/whisplay-ai-chatbot/run_chatbot.sh
+WorkingDirectory=$USER_HOME/solarbot
+ExecStart=/bin/bash $USER_HOME/solarbot/run_chatbot.sh
 
 # Inject the dynamic Node path and dynamic User ID
 Environment=PATH=$NODE_FOLDER:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
@@ -72,8 +72,8 @@ Environment=NODE_ENV=production
 PrivateDevices=no
 
 # Logs
-StandardOutput=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
-StandardError=append:$USER_HOME/whisplay-ai-chatbot/chatbot.log
+StandardOutput=append:$USER_HOME/solarbot/chatbot.log
+StandardError=append:$USER_HOME/solarbot/chatbot.log
 
 Restart=always
 RestartSec=2
