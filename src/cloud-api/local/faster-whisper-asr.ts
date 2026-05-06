@@ -15,8 +15,10 @@ const fasterWhisperRequestType =
 
 let pyProcess: any = null;
 const asrServer = process.env.ASR_SERVER || "";
+const serveFasterWhisper = (process.env.SERVE_FASTER_WHISPER || "").toLowerCase() === "true";
 
 if (
+  serveFasterWhisper &&
   asrServer.trim().toLowerCase() === ASRServer.fasterwhisper &&
   ["localhost", "0.0.0.0", "127.0.0.1"].includes(fasterWhisperHost)
 ) {
