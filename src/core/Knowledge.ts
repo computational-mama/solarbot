@@ -1,7 +1,7 @@
 import { vectorDB, embedText, summaryTextWithLLM, enableRAG } from "../cloud-api/knowledge";
 import { knowledgeDir } from "../utils/dir";
 import fs from "fs";
-import { chunkText } from "../utils/knowledge";
+import { chunkText, buildSparseVector } from "../utils/knowledge";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import readline from "readline";
@@ -88,7 +88,10 @@ export async function indexKnowledgeCollection() {
     const chunks = chunkText(content, 500, 80);
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      const embedding = await embedText(chunk);
+      const [embedding, sparseVector] = await Promise.all([
+        embedText(chunk),
+        Promise.resolve(buildSparseVector(chunk)),
+      ]);
       console.log(`Embedding chunk ${i + 1}/${chunks.length} of file ${file}`);
       const summary = enableKnowledgeSummary
         ? await summaryTextWithLLM(chunk, promptPrefix)
@@ -97,6 +100,7 @@ export async function indexKnowledgeCollection() {
         {
           id: uuidv4(),
           vector: embedding,
+          sparseVector,
           payload: {
             content: chunk,
             summary,
@@ -243,13 +247,19 @@ async function promptChoice(question: string, defaultValue: string): Promise<str
 }
 
 export async function queryKnowledgeBase(query: string, topK: number = 3) {
-  const queryEmbedding = await embedText(query);
-  const results = await vectorDB.search(collectionName, queryEmbedding, topK);
+  const [queryEmbedding, sparseVector] = await Promise.all([
+    embedText(query),
+    Promise.resolve(buildSparseVector(query)),
+  ]);
+  const results = await vectorDB.search(
+    collectionName,
+    queryEmbedding,
+    topK,
+    undefined,
+    knowledgeScoreThreshold,
+    sparseVector
+  );
   return results;
-}
-
-export async function retrieveKnowledgeByIds(ids: string[]) {
-  return await vectorDB.retrieve(collectionName, ids);
 }
 
 export async function getSystemPromptWithKnowledge(query: string) {
@@ -263,25 +273,20 @@ export async function getSystemPromptWithKnowledge(query: string) {
       | null;
   }[] = [];
   try {
-    results = await queryKnowledgeBase(query, 1);
+    results = await queryKnowledgeBase(query, 3);
   } catch (error) {
     console.error("[RAG] Error querying knowledge base:", error);
     return "";
   }
   if (results.length === 0) {
-    console.log("[RAG] No knowledge found.");
+    console.log("[RAG] No knowledge found above threshold.");
     return "";
   }
-  const topResult = results[0];
-  if (topResult.score < knowledgeScoreThreshold) {
-    console.log("[RAG] Top knowledge score below threshold:", topResult.score);
-    return "";
-  }
-  const knowledgeId = topResult.id as string;
-  const knowledgeData = await retrieveKnowledgeByIds([knowledgeId]);
-  if (knowledgeData.length === 0) {
-    return "";
-  }
-  const knowledgeContent = knowledgeData[0].payload!.summary || knowledgeData[0].payload!.content;
-  return `Use the following knowledge to assist in answering the question:\n${knowledgeContent}\n`;
+  const snippets = results.map((r) => {
+    const p = r.payload as Record<string, unknown>;
+    return (p?.summary || p?.content) as string;
+  }).filter(Boolean);
+  if (snippets.length === 0) return "";
+  console.log(`[RAG] Injecting ${snippets.length} knowledge snippet(s), top score: ${results[0].score.toFixed(3)}`);
+  return `Use the following knowledge to assist in answering the question:\n${snippets.join("\n---\n")}\n`;
 }

@@ -260,6 +260,9 @@ export default class VectorDB implements VectorDBClass {
         size: vectorSize,
         distance: distance,
       },
+      sparse_vectors: {
+        bm25: { modifier: "idf" },
+      },
     });
   };
 
@@ -277,12 +280,19 @@ export default class VectorDB implements VectorDBClass {
     points: Array<{
       id: number | string;
       vector: number[];
+      sparseVector?: { indices: number[]; values: number[] };
       payload?: Record<string, any>;
     }>
   ) => {
     await this.client.upsert(collectionName, {
       wait: true,
-      points: points,
+      points: points.map((p) => ({
+        id: p.id,
+        vector: p.sparseVector
+          ? { dense: p.vector, bm25: p.sparseVector }
+          : p.vector,
+        payload: p.payload,
+      })),
     });
   };
 
@@ -290,15 +300,28 @@ export default class VectorDB implements VectorDBClass {
     collectionName: string,
     queryVector: number[],
     limit: number,
-    filter?: any
+    filter?: any,
+    scoreThreshold?: number,
+    sparseVector?: { indices: number[]; values: number[] }
   ) => {
+    if (sparseVector) {
+      const prefetch = [
+        { query: queryVector, using: "dense", limit: limit * 2 },
+        { query: sparseVector, using: "bm25", limit: limit * 2 },
+      ];
+      const params: any = { prefetch, query: { fusion: "rrf" }, limit, with_payload: true };
+      if (filter) params.filter = filter;
+      if (scoreThreshold !== undefined) params.score_threshold = scoreThreshold;
+      return await (this.client as any).query(collectionName, params);
+    }
+
     const searchParams: any = {
       vector: queryVector,
       limit: limit,
+      with_payload: true,
     };
-    if (filter) {
-      searchParams.filter = filter;
-    }
+    if (filter) searchParams.filter = filter;
+    if (scoreThreshold !== undefined) searchParams.score_threshold = scoreThreshold;
     return await this.client.search(collectionName, searchParams);
   };
 
