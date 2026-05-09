@@ -927,6 +927,7 @@ def start_socket_server(render_thread, host="0.0.0.0", port=12345):
         print("[Socket] Server stopped")
     finally:
         render_thread.stop()
+        whisplay.cleanup()
         server_socket.close()
 
 
