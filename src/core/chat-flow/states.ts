@@ -40,7 +40,7 @@ export const flowStates: Record<FlowName, FlowStateHandler> = {
       emoji: "😴",
       RGB: "#000055",
       rag_icon_visible: false,
-      text: "Hold to speak with \nsun shines. >>",
+      text: "Hold to speak with sun shines. >>",
     });
   },
 
