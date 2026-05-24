@@ -43,11 +43,11 @@ ollama pull nomic-embed-text      # embeddings for RAG
 
 ```bash
 pip install piper-tts --break-system-packages
-# Download a voice model
-python3 -m piper.download_voices en_US-amy-medium
+# Download a voice model into the project's voices/ directory
+python3 -m piper.download_voices --data-dir ~/solarbot/voices en_US-amy-medium
 ```
 
-The model will land in `~/piper/`. Note the path — you'll set it in `.env`.
+The model will land in `~/solarbot/voices/`. Note the path — you'll set it in `.env`.
 
 ### 5. Set up the faster-whisper service
 
@@ -89,8 +89,8 @@ cp .env.template .env
 Edit `.env` — the two lines you must change for your machine:
 
 ```env
-PIPER_BINARY_PATH=/home/pi/.local/bin/piper         # where piper binary lives
-PIPER_MODEL_PATH=/home/pi/piper/en_US-amy-medium.onnx  # voice model path
+PIPER_BINARY_PATH=/home/pi/.local/bin/piper              # where piper binary lives
+PIPER_MODEL_PATH=/home/pi/solarbot/voices/en_US-amy-medium.onnx  # voice model path
 ```
 
 Everything else works out of the box with the defaults.
@@ -209,16 +209,35 @@ OLLAMA_MODEL=qwen2.5:1.5b
 Download a different Piper voice:
 
 ```bash
-python3 -m piper.download_voices en_GB-alba-medium
+python3 -m piper.download_voices --data-dir ~/solarbot/voices en_GB-alba-medium
 ```
 
 Then update `.env`:
 
 ```env
-PIPER_MODEL_PATH=/home/pi/piper/en_GB-alba-medium.onnx
+PIPER_MODEL_PATH=/home/pi/solarbot/voices/en_GB-alba-medium.onnx
 ```
 
 Browse voices at [rhasspy.github.io/piper-samples](https://rhasspy.github.io/piper-samples/).
+
+### Enable wake word
+
+```env
+WAKE_WORD_ENABLED=true
+WAKE_WORDS=hey_jarvis            # comma-separated list
+WAKE_WORD_THRESHOLD=0.5
+WAKE_WORD_IDLE_TIMEOUT_SEC=60    # end session after this many idle seconds
+WAKE_WORD_END_KEYWORDS=byebye,goodbye,stop
+```
+
+No rebuild needed.
+
+### Change the default emoji or UI color
+
+```env
+DEFAULT_EMOJI=🌞                 # shown in the header when LLM text has no emoji
+UI_BACKGROUND_COLOR=#FFF5D1      # LCD background (hex or r,g,b)
+```
 
 ### Add a custom LLM tool (function calling)
 
@@ -248,15 +267,20 @@ Range is 0.0–1.0. Re-index after changing the knowledge files, not just the th
 solarbot/
 ├── src/
 │   ├── index.ts                    # entry point
-│   ├── cloud-api/local/            # faster-whisper, ollama, piper, qdrant
+│   ├── cloud-api/local/            # faster-whisper, ollama, piper, qdrant adapters
 │   ├── core/                       # chat flow state machine
-│   ├── device/                     # audio, display, button
-│   ├── config/                     # system prompt, LLM tools
-│   ├── plugin/                     # plugin registry (asr/llm/tts)
-│   └── utils/                      # text helpers, dir paths
-├── python/                         # hardware interface (GPIO, LCD, socket)
+│   ├── device/                     # audio, display, button, wake word, web bridge
+│   ├── config/                     # LLM config, custom tool template
+│   ├── plugin/                     # plugin registry (asr/llm/tts/llm-tools)
+│   ├── admin/                      # browser admin server
+│   ├── status/                     # battery, wifi, VPN status pollers
+│   ├── type/                       # shared TypeScript types
+│   └── utils/                      # text helpers, dir paths, image utils
+├── python/                         # hardware interface (GPIO, LCD, socket, camera)
 ├── knowledge/                      # drop your .txt/.md/.pdf files here
-├── docker/                         # faster-whisper, piper, qdrant services
+├── voices/                         # Piper .onnx voice model files
+├── web/admin/                      # admin UI frontend
+├── docker/                         # faster-whisper, qdrant, optional services
 ├── .env.template                   # copy to .env and edit
 └── data/                           # runtime audio, embeddings (auto-created)
 ```

@@ -407,7 +407,8 @@ export class WhisplayDisplay {
     this.currentStatus.music_duration_ms = music_duration_ms;
     
     const changedValuesObj = Object.fromEntries(changedValues);
-    changedValuesObj.brightness = 100;
+    // Respect an explicit brightness value; default every call to 100 otherwise.
+    changedValuesObj.brightness = 'brightness' in newStatus ? newStatus.brightness! : 100;
     const data = JSON.stringify(changedValuesObj);
     if (isTextChanged) console.log("send data:", data);
 

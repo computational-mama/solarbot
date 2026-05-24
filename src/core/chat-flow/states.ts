@@ -21,27 +21,64 @@ import { getLatestGenImg, getLatestDisplayImg } from "../../utils/image";
 import { ChatFlowContext, FlowName, FlowStateHandler } from "./types";
 import { DEFAULT_EMOJI } from "../../utils";
 
+const IDLE_SCREEN_TIMEOUT_MS =
+  parseInt(process.env.IDLE_SCREEN_TIMEOUT_SEC || "120") * 1000;
+
+let idleTimer: NodeJS.Timeout | null = null;
+let isScreenBlanked = false;
+
+function clearIdleTimer(): void {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+}
+
+const SLEEP_DISPLAY = {
+  status: "idle",
+  emoji: "😴",
+  RGB: "#000055",
+  rag_icon_visible: false,
+  text: "Hold to speak with sun shines. >>",
+} as const;
+
 export const flowStates: Record<FlowName, FlowStateHandler> = {
   sleep: (ctx: ChatFlowContext) => {
+    clearIdleTimer();
+    isScreenBlanked = false;
+
+    const startIdleTimer = () => {
+      clearIdleTimer();
+      idleTimer = setTimeout(() => {
+        if (ctx.currentFlowName !== "sleep") return;
+        isScreenBlanked = true;
+        display({ brightness: 0 });
+      }, IDLE_SCREEN_TIMEOUT_MS);
+    };
+
+    startIdleTimer();
+
     onButtonPressed(() => {
+      if (isScreenBlanked) {
+        isScreenBlanked = false;
+        display(SLEEP_DISPLAY);
+        startIdleTimer();
+        return;
+      }
+      clearIdleTimer();
       ctx.transitionTo("listening");
     });
     onButtonReleased(noop);
     onButtonDoubleClick(null);
     onTextInput((text: string) => {
       if (ctx.currentFlowName !== "sleep") return;
+      clearIdleTimer();
       ctx.answerId += 1;
       ctx.asrText = text;
       display({ status: "recognizing", text, text_input_enabled: false });
       ctx.transitionTo("answer");
     });
-    display({
-      status: "idle",
-      emoji: "😴",
-      RGB: "#000055",
-      rag_icon_visible: false,
-      text: "Hold to speak with sun shines. >>",
-    });
+    display(SLEEP_DISPLAY);
   },
 
   listening: (ctx: ChatFlowContext) => {
