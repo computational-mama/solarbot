@@ -1,0 +1,1571 @@
+#!/usr/bin/env python3
+"""
+pmic-web.py
+
+Live power meter for the Raspberry Pi 5, served as a small web page.
+
+The Pi 5's PMIC reports per-rail voltage and current, so the board can measure
+its own consumption with no extra hardware. This samples those rails in the
+background and serves a page showing watts over time, plus a box to send a
+question to Ollama and get the energy cost of that single answer.
+
+It measures the rails INSIDE the Pi. It does not include the Whisplay HAT's
+screen and speaker, anything on USB, or the PiSugar's conversion losses, so it
+reads lower than what the battery actually gives up. For "what did the thinking
+cost", which happens on VDD_CORE, that is the right boundary.
+
+Run:  python3 pmic-web.py
+Then open http://<pi-address>:8425/
+"""
+
+import csv
+import io
+import json
+import os
+
+try:
+    import fcntl          # Linux only; without it the panel sensor is skipped
+except ImportError:
+    fcntl = None
+import re
+import socket
+import subprocess
+import threading
+import time
+import html
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import deque
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Everything below can be overridden with an environment variable, so this
+# runs on a bot that does not live in /home/pi.
+def env(name, default):
+    return os.environ.get(name, default)
+
+
+PORT = int(env("PMIC_WEB_PORT", "8425"))
+SAMPLE_HZ = int(env("PMIC_SAMPLE_HZ", "10"))
+HISTORY_SECONDS = int(env("PMIC_HISTORY_SECONDS", "300"))
+OLLAMA = env("OLLAMA_ENDPOINT", "http://localhost:11434")
+BOT_DIR = env("SOLARBOT_DIR", "/home/pi/solarbot")
+ENV_FILE = env("SOLARBOT_ENV_FILE", os.path.join(BOT_DIR, ".env"))
+LOG_FILE = env("SOLARBOT_LOG_FILE", os.path.join(BOT_DIR, "chatbot.log"))
+
+# Everything measured is written here so a restart does not lose it.
+#   questions.jsonl      one JSON object per question, append only
+#   power-YYYY-MM-DD.csv one row per second: epoch, total watts, cpu watts
+DATA_DIR = env("POWER_DATA_DIR", os.path.join(BOT_DIR, "data", "power"))
+QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.jsonl")
+
+# PiSugar's own server. It reports charge level and terminal voltage but not
+# current: on this board the output-current registers read zero, which is why
+# the meter reads the Pi's PMIC instead.
+# The INA219 on the charge input, between the solar panel and its converter.
+# Optional: if it is not wired up, everything else carries on without it.
+I2C_BUS = env("I2C_BUS", "/dev/i2c-1")
+INA219_ADDR = int(env("INA219_ADDR", "0x40"), 16)
+INA219_SHUNT_OHMS = float(env("INA219_SHUNT_OHMS", "0.1"))
+
+PISUGAR = (env("PISUGAR_HOST", "127.0.0.1"), int(env("PISUGAR_PORT", "8423")))
+BATTERY_MAH = int(env("BATTERY_MAH", "1200"))
+BATTERY_NOMINAL_V = float(env("BATTERY_NOMINAL_V", "3.7"))
+BATTERY_JOULES = BATTERY_MAH / 1000 * 3600 * BATTERY_NOMINAL_V   # about 15980 J
+
+# How far the battery must fall before a calibration figure means anything.
+# The reading has been seen to swing 4 to 5 points in two minutes purely from
+# load, so a small drop is noise, not discharge.
+MIN_DROP_PERCENT = 5.0
+
+_ADC = re.compile(r"^\s*(\S+?)_(A|V)\s+(?:current|volt)\(\d+\)=([0-9.]+)")
+_STATE = re.compile(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*switch to:\s*(\w+)")
+
+
+def read_env():
+    """Pull OLLAMA_MODEL and SYSTEM_PROMPT out of the chatbot's .env.
+
+    So the page can default to the same model the bot uses, and optionally send
+    the same system prompt. Comparing a bare prompt against the bot's prompt is
+    comparing two different amounts of work.
+    """
+    model, system, key = "qwen2.5:0.5b", "", None
+    try:
+        lines = open(ENV_FILE, encoding="utf-8", errors="replace").read().splitlines()
+    except Exception:
+        return model, system
+    buf = []
+    for line in lines:
+        if key == "SYSTEM_PROMPT":                # may span several lines
+            buf.append(line)
+            if line.rstrip().endswith('"'):
+                system = "\n".join(buf).rstrip().rstrip('"')
+                key = None
+            continue
+        s = line.strip()
+        if s.startswith("OLLAMA_MODEL="):
+            model = s.split("=", 1)[1].strip().strip('"').strip("'")
+        elif s.startswith("SYSTEM_PROMPT="):
+            v = s.split("=", 1)[1].lstrip()
+            if v.startswith('"') and not v.rstrip().endswith('"'):
+                key, buf = "SYSTEM_PROMPT", [v[1:]]
+            else:
+                system = v.strip().strip('"').strip("'")
+    return model, system
+
+
+BOT_MODEL, BOT_SYSTEM = read_env()
+
+samples = deque(maxlen=SAMPLE_HZ * HISTORY_SECONDS)
+samples_lock = threading.Lock()
+idle_watts = 0.0
+
+states = deque(maxlen=800)
+states_lock = threading.Lock()
+
+questions = deque(maxlen=200)
+questions_lock = threading.Lock()
+
+battery = {"level": None, "volts": None, "plugged": None, "charging": None,
+           "ok": False, "at": 0}
+
+panel = {"volts": None, "amps": None, "watts": None, "ok": False}
+panel_lock = threading.Lock()
+joules_in = 0.0          # everything the panel has delivered since start
+battery_lock = threading.Lock()
+
+# Running total of every joule the meter has counted since this process began,
+# so a calibration session can compare it against what the battery actually lost.
+joules_total = 0.0
+session = {"t": 0.0, "joules": 0.0, "level": None}
+session_lock = threading.Lock()
+
+_RECOG = re.compile(r"Audio recognized:\s*(.+?)\s*$")
+
+
+def read_power():
+    """Return (total_watts, core_watts) from one PMIC read."""
+    try:
+        out = subprocess.run(["vcgencmd", "pmic_read_adc"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return 0.0, 0.0
+    amps, volts = {}, {}
+    for line in out.splitlines():
+        m = _ADC.match(line)
+        if m:
+            rail, kind, val = m.group(1), m.group(2), float(m.group(3))
+            (amps if kind == "A" else volts)[rail] = val
+    total = sum(a * volts.get(r, 0.0) for r, a in amps.items())
+    core = amps.get("VDD_CORE", 0.0) * volts.get("VDD_CORE", 0.0)
+    return total, core
+
+
+def read_panel():
+    """Read the INA219 over raw I2C. Returns (volts, amps, watts) or None.
+
+    Two plain register reads, no library: the bus voltage register holds the
+    reading in its top 13 bits at 4 mV a step, and the shunt register is a
+    signed value at 10 uV a step, which over a known shunt gives the current.
+    """
+    if fcntl is None:
+        return None
+    try:
+        fd = os.open(I2C_BUS, os.O_RDWR)
+    except Exception:
+        return None
+    try:
+        fcntl.ioctl(fd, 0x0703, INA219_ADDR)      # I2C_SLAVE
+
+        def reg(r):
+            os.write(fd, bytes([r]))
+            b = os.read(fd, 2)
+            return (b[0] << 8) | b[1]
+
+        volts = (reg(0x02) >> 3) * 0.004
+        raw = reg(0x01)
+        if raw > 32767:
+            raw -= 65536
+        amps = raw * 1e-5 / INA219_SHUNT_OHMS
+        return volts, amps, volts * amps
+    except Exception:
+        return None
+    finally:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+
+
+def pisugar(cmd):
+    """One request to the PiSugar server. Returns the value after the colon."""
+    try:
+        s = socket.create_connection(PISUGAR, timeout=3)
+        try:
+            s.sendall((cmd + "\n").encode())
+            reply = s.recv(256).decode("utf-8", "replace").strip()
+        finally:
+            s.close()
+    except Exception:
+        return None
+    if ":" not in reply:
+        return None
+    val = reply.split(":", 1)[1].strip()
+    return None if "not connected" in val.lower() else val
+
+
+def battery_poller():
+    """Follow the PiSugar. It updates about once a second, so 5 s is plenty."""
+    while True:
+        level = pisugar("get battery")
+        volts = pisugar("get battery_v")
+        plug = pisugar("get battery_power_plugged")
+        chrg = pisugar("get battery_charging")
+        with battery_lock:
+            try:
+                battery["level"] = round(float(level), 2) if level else None
+                battery["volts"] = round(float(volts), 3) if volts else None
+            except ValueError:
+                battery["level"] = battery["volts"] = None
+            battery["plugged"] = (plug == "true") if plug else None
+            battery["charging"] = (chrg == "true") if chrg else None
+            battery["ok"] = battery["level"] is not None
+            battery["at"] = time.time()
+        # Anchor a session the first time we get a reading.
+        with session_lock:
+            if session["level"] is None and battery["ok"]:
+                session.update({"t": time.time(), "joules": joules_total,
+                                "level": battery["level"]})
+        time.sleep(5)
+
+
+def session_report():
+    with battery_lock:
+        lvl, plugged = battery["level"], battery["plugged"]
+    with session_lock:
+        start_t, start_j, start_lvl = session["t"], session["joules"], session["level"]
+    measured = max(0.0, joules_total - start_j)
+    out = {"seconds": round(time.time() - start_t, 1) if start_t else 0,
+           "measured_joules": round(measured, 1),
+           "start_level": start_lvl, "level": lvl,
+           "plugged": plugged, "drop": None,
+           "battery_joules": None, "factor": None}
+    out["min_drop"] = MIN_DROP_PERCENT
+    out["suspect"] = False
+    if lvl is not None and start_lvl is not None:
+        drop = start_lvl - lvl
+        out["drop"] = round(drop, 3)
+        # The PiSugar derives its percentage from voltage, and voltage sags
+        # under load, so the reading swings by several points on its own.
+        # Anything smaller than MIN_DROP_PERCENT is inside that noise.
+        if drop >= MIN_DROP_PERCENT and measured > 0 and plugged is False:
+            real = drop / 100.0 * BATTERY_JOULES
+            factor = real / measured
+            out["battery_joules"] = round(real, 1)
+            # Below 1 is physically impossible: the battery also pays for the
+            # HAT and the conversion losses, so it must give up more than the
+            # rails consume. A number under 1 means the battery reading is not
+            # tracking energy over this window, not that the bot is efficient.
+            if factor < 1.0:
+                out["suspect"] = True
+            else:
+                out["factor"] = round(factor, 2)
+    return out
+
+
+CSV_HEADER = ("time,epoch,total_watts,cpu_watts,battery_percent,battery_volts,"
+              "power_plugged,panel_volts,panel_amps,panel_watts")
+
+
+def ensure_header(path, header):
+    """Start the file with a header, and set aside any file written to an
+    older layout rather than appending rows that no longer line up."""
+    try:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                if f.readline().strip() == header:
+                    return
+            os.rename(path, path + ".old-format")
+        append_line(path, header)
+    except Exception:
+        pass
+
+
+def append_line(path, line):
+    """Append one line, never letting a disk problem take the meter down."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def load_questions():
+    """Read back what earlier runs measured, so the page keeps its history."""
+    try:
+        with open(QUESTIONS_FILE, encoding="utf-8", errors="replace") as f:
+            rows = f.readlines()[-questions.maxlen:]
+    except Exception:
+        return
+    for line in rows:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            questions.append(json.loads(line))
+        except Exception:
+            continue
+
+
+def sampler():
+    """Sample the PMIC forever, keep a rolling idle baseline, log 1 Hz to CSV."""
+    global idle_watts, joules_total, joules_in
+    dt = 1.0 / SAMPLE_HZ
+    bucket, bucket_sec = [], 0
+    last_t = None
+    tick = 0
+    while True:
+        t = time.time()
+        total, core = read_power()
+
+        # The panel changes slowly and shares the bus with the PiSugar, so a
+        # couple of reads a second is plenty.
+        tick += 1
+        if tick % max(1, SAMPLE_HZ // 2) == 0:
+            p = read_panel()
+            with panel_lock:
+                if p is None:
+                    panel.update(volts=None, amps=None, watts=None, ok=False)
+                else:
+                    panel.update(volts=round(p[0], 3), amps=round(p[1], 4),
+                                 watts=round(p[2], 4), ok=True)
+        with panel_lock:
+            pw = panel["watts"]
+
+        if last_t is not None:
+            step = min(2.0, t - last_t)
+            joules_total += total * step
+            if pw:
+                joules_in += pw * step
+        last_t = t
+
+        # One averaged row per second. Ten a second would be 860k rows a day.
+        sec = int(t)
+        if bucket_sec and sec != bucket_sec and bucket:
+            n = len(bucket)
+            path = os.path.join(DATA_DIR, "power-%s.csv"
+                                % time.strftime("%Y-%m-%d", time.localtime(bucket_sec)))
+            ensure_header(path, CSV_HEADER)
+            with battery_lock:
+                lvl, volts, plug = battery["level"], battery["volts"], battery["plugged"]
+            with panel_lock:
+                pv, pa, pwt = panel["volts"], panel["amps"], panel["watts"]
+            append_line(path, "%s,%d,%.4f,%.4f,%s,%s,%s,%s,%s,%s" % (
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(bucket_sec)),
+                bucket_sec,
+                sum(b[0] for b in bucket) / n,
+                sum(b[1] for b in bucket) / n,
+                "" if lvl is None else "%.2f" % lvl,
+                "" if volts is None else "%.3f" % volts,
+                "" if plug is None else ("yes" if plug else "no"),
+                "" if pv is None else "%.3f" % pv,
+                "" if pa is None else "%.4f" % pa,
+                "" if pwt is None else "%.4f" % pwt))
+            bucket = []
+        bucket_sec = sec
+        bucket.append((total, core))
+
+        with samples_lock:
+            samples.append((t, total, core, pw if pw is not None else 0.0))
+            # Idle baseline: mean of the quietest tenth of the last two minutes.
+            recent = sorted(s[1] for s in samples if t - s[0] < 120)
+            if len(recent) > 20:
+                k = max(1, len(recent) // 10)
+                idle_watts = sum(recent[:k]) / k
+        time.sleep(max(0.0, dt - (time.time() - t)))
+
+
+def loaded_model():
+    """Ask Ollama which model is resident right now.
+
+    More honest than reading OLLAMA_MODEL from .env, because that only says what
+    the bot was configured with, not what actually ran. Embedding models are
+    filtered out; they are loaded for RAG alongside the chat model.
+    """
+    try:
+        with urllib.request.urlopen(OLLAMA + "/api/ps", timeout=5) as r:
+            names = [m.get("name", "") for m in json.loads(r.read()).get("models", [])]
+        names = [n for n in names if "embed" not in n.lower()]
+        if names:
+            return names[0]
+    except Exception:
+        pass
+    return BOT_MODEL
+
+
+def close_question(cycle, t_end, text):
+    """Turn one finished listen/asr/answer cycle into a row for the page."""
+    t0 = cycle.get("listening") or cycle.get("asr") or cycle.get("answer")
+    if t0 is None or "answer" not in cycle:
+        return
+
+    def phase(a, b):
+        rows = window(a, b)
+        j, jc = energy(rows)
+        return {"seconds": round(max(0.0, b - a), 2),
+                "joules": round(j, 1),
+                "joules_core": round(jc, 1),
+                "peak": round(max((r[1] for r in rows), default=0.0), 2)}
+
+    # Only log what we actually measured. Phases are seeded from the tail of
+    # the log at startup, so old cycles would otherwise show up with 0 J
+    # because there is no power history covering them.
+    if len(window(t0, t_end)) < 3:
+        return
+
+    t_asr = cycle.get("asr", cycle["answer"])
+    t_ans = cycle["answer"]
+    whole = phase(t0, t_end)
+    base = idle_watts * max(0.0, t_end - t0)
+    with battery_lock:
+        plugged, blvl, bvolt = battery["plugged"], battery["level"], battery["volts"]
+    row = {
+        "t": round(t0, 1),
+        "iso": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t0)),
+        "text": (text or "").strip()[:200],
+        "model": loaded_model(),
+        "source": "mains" if plugged else ("battery" if plugged is False else "unknown"),
+        "battery_percent": blvl,
+        "battery_volts": bvolt,
+        "total": whole,
+        "above_idle": round(max(0.0, whole["joules"] - base), 1),
+        "idle_watts": round(idle_watts, 3),
+        "phases": {
+            "listening": phase(t0, t_asr),
+            "transcribing": phase(t_asr, t_ans),
+            "answering": phase(t_ans, t_end),
+        },
+    }
+    with questions_lock:
+        questions.append(row)
+    append_line(QUESTIONS_FILE, json.dumps(row))
+
+
+def log_tailer():
+    """Follow the chatbot's log: state transitions, and whole question cycles.
+
+    The bot already prints "[2026-09-15 15:49:05] switch to: asr" on every
+    transition and "Audio recognized: ..." once it has your words, so both the
+    phase bands and a per-question log can be built without touching the bot.
+    """
+    pos = None
+    first = True
+    cycle = None
+    last_text = ""
+    while True:
+        try:
+            with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                if first:
+                    # Seed phases from the tail of the log, but start the
+                    # question log empty: there is no power history for
+                    # anything that happened before this process started.
+                    pos = max(0, size - 400_000)
+                    first = False
+                elif pos is None or pos > size:   # log was rotated or truncated
+                    pos = size
+                f.seek(pos)
+                for line in f:
+                    r = _RECOG.search(line)
+                    if r:
+                        last_text = r.group(1)
+                        continue
+                    m = _STATE.search(line)
+                    if not m:
+                        continue
+                    try:
+                        t = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
+                    except Exception:
+                        continue
+                    name = m.group(2)
+                    with states_lock:
+                        if not states or states[-1][1] != name:
+                            states.append((t, name))
+
+                    if cycle is not None and "answer" in cycle and name != "answer":
+                        close_question(cycle, t, last_text)
+                        cycle, last_text = None, ""
+                    if name == "listening":
+                        cycle = {"listening": t}
+                    elif cycle is not None and name in ("asr", "answer"):
+                        cycle.setdefault(name, t)
+                    elif name == "sleep":
+                        cycle = None
+                pos = f.tell()
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+
+def window(t0, t1):
+    with samples_lock:
+        return [s for s in samples if t0 <= s[0] <= t1]
+
+
+def energy(rows):
+    """Integrate watts over time -> joules. Returns (total_j, core_j)."""
+    j_tot = j_core = 0.0
+    for i in range(1, len(rows)):
+        dt = rows[i][0] - rows[i - 1][0]
+        j_tot += rows[i - 1][1] * dt
+        j_core += rows[i - 1][2] * dt
+    return j_tot, j_core
+
+
+def ollama_models():
+    try:
+        with urllib.request.urlopen(OLLAMA + "/api/tags", timeout=10) as r:
+            return [m["name"] for m in json.loads(r.read()).get("models", [])]
+    except Exception:
+        return []
+
+
+def ollama_ask(model, prompt, system=""):
+    """Try /api/chat first; models with no chat template fall back to generate."""
+    msgs = ([{"role": "system", "content": system}] if system else []) + \
+           [{"role": "user", "content": prompt}]
+    body = json.dumps({"model": model,
+                       "messages": msgs,
+                       "stream": False, "keep_alive": -1}).encode()
+    req = urllib.request.Request(OLLAMA + "/api/chat", data=body,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            d = json.loads(r.read())
+        text = (d.get("message") or {}).get("content", "")
+        if text.strip():
+            return text, "chat", d.get("eval_count")
+    except urllib.error.HTTPError:
+        pass
+    except Exception as e:
+        return "(error: %s)" % e, "chat", None
+
+    raw = (system + "\n\n" + prompt) if system else prompt
+    body = json.dumps({"model": model, "prompt": raw,
+                       "stream": False, "keep_alive": -1}).encode()
+    req = urllib.request.Request(OLLAMA + "/api/generate", data=body,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            d = json.loads(r.read())
+        return d.get("response", ""), "generate", d.get("eval_count")
+    except Exception as e:
+        return "(error: %s)" % e, "generate", None
+
+
+PAGE = """<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Solarbot power</title>
+<style>
+ :root{--bg:#fff5d1;--ink:#2b2320;--line:#c9b98a;--hi:#d2691e;--core:#3a7d6c;--wide:1100px}
+ *{box-sizing:border-box}
+ body{margin:0;padding:0 16px 28px;font:14px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+ h1{font-size:22px;font-weight:600;margin:0 0 14px;text-align:center;letter-spacing:.02em}
+ h2{font-size:15px;font-weight:600;margin:0 0 4px;letter-spacing:.01em}
+ /* Keep the measure readable instead of stretching to the window. */
+ header>h1,header>.row,header>.tabs,.panel{max-width:var(--wide);margin-left:auto;margin-right:auto}
+ /* The stats stay put while you move between tabs: they are context for all of them. */
+ header{position:sticky;top:0;z-index:5;background:var(--bg);padding:16px 0 0;
+        box-shadow:0 10px 12px -10px rgba(43,35,32,.18)}
+ .strip .card{flex:1 1 120px;padding:8px 12px}
+ .strip .big{font-size:21px}
+ .tabs{display:flex;gap:3px;border-bottom:1px solid var(--line);margin:4px 0 0}
+ .tabs button{background:none;border:1px solid transparent;border-bottom:none;color:inherit;
+   border-radius:9px 9px 0 0;padding:8px 18px;cursor:pointer;opacity:.6;margin-bottom:-1px}
+ .tabs button:hover{opacity:.9}
+ .tabs button.on{background:#fffdf5;border-color:var(--line);opacity:1;font-weight:600}
+ /* Left: the two views. Right: the tools. */
+ .tabs button.apart{margin-left:auto}
+ .panel{padding-top:20px}
+ .panel[hidden]{display:none}
+ /* Tooltips must never run off a narrow screen. */
+ .i:hover::after,.i:focus::after{max-width:calc(100vw - 32px)}
+ /* Anything table-shaped may scroll sideways rather than break the layout. */
+ #qlog,#out,#reportbody,#scatter{overflow-x:auto}
+
+ @media (max-width:700px){
+   body{padding:0 12px 24px}
+   /* A sticky header eats half a phone screen, so let it scroll away. */
+   header{position:static;box-shadow:none;padding-top:12px}
+   h1{font-size:19px;margin-bottom:10px}
+   .strip{gap:8px}
+   .strip .card{flex:1 1 calc(50% - 4px);padding:7px 10px}
+   .strip .big{font-size:18px}
+   .big .sub{font-size:12px;margin-left:6px}
+   /* Four tabs will not fit side by side, so they scroll. */
+   .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+   .tabs button{padding:8px 12px;font-size:13px;white-space:nowrap}
+   .tabs button.apart{margin-left:12px}
+   .panel{padding-top:16px}
+   canvas{height:220px}
+   .card{flex:1 1 calc(50% - 6px)}
+   textarea{min-height:76px}
+   table{font-size:12px}
+   td.q{max-width:180px}
+ }
+ .btn{display:inline-block;background:var(--hi);color:#fff;border:1px solid var(--hi);
+       border-radius:8px;padding:8px 16px;cursor:pointer;text-decoration:none;font-size:14px}
+ .rp{background:#fffdf5;border:1px solid var(--line);border-radius:10px;
+     padding:13px 16px;margin:10px 0}
+ .rp .when{font-size:12px;opacity:.7;margin-right:8px}
+ .rp .tag{display:inline-block;background:#f0e6c8;border-radius:20px;
+          padding:1px 9px;margin-right:5px;font-size:12px}
+ .rp blockquote{margin:9px 0 10px;font-size:16px;font-style:italic}
+ .rp .cost{font-size:13px} .rp .cost b{font-size:20px;font-style:normal}
+ .rp .sep{margin:0 7px;opacity:.4}
+ .rp .bars{margin-top:9px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;opacity:.85}
+ .row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+ .card{background:#fffdf5;border:1px solid var(--line);border-radius:10px;padding:12px 14px;flex:1 1 150px}
+ .big{font-size:30px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+ /* A second reading alongside the main one, so every tile stays two lines tall. */
+ .big .sub{font-size:14px;font-weight:400;opacity:.6;margin-left:8px}
+ .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.65;
+      white-space:nowrap}
+ canvas{width:100%;height:320px;display:block;background:#fffdf5;
+        border:1px solid var(--line);border-radius:10px}
+ textarea,select,button{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fffdf5;color:inherit}
+ textarea{width:100%;min-height:60px;resize:vertical}
+ button{background:var(--hi);color:#fff;border-color:var(--hi);cursor:pointer;padding:8px 16px}
+ button[disabled]{opacity:.5;cursor:default}
+ table{border-collapse:collapse;width:100%;margin-top:18px;font-size:13px;
+       font-variant-numeric:tabular-nums}
+ th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line)}
+ td.n,th.n{white-space:nowrap}
+ /* Headings stay on one line, so the ? never drops below its label. */
+ th{white-space:nowrap}
+ /* The question itself may wrap, but not stretch the whole table. */
+ td.q{max-width:260px;white-space:normal}
+ /* One stacked bar instead of three columns of "x s / y J". */
+ #qlog{overflow-x:auto;margin-top:14px}
+ #scatter{margin-top:14px}
+ .pbar{display:flex;height:11px;border-radius:3px;overflow:hidden;min-width:96px;
+       background:#ece2c4;cursor:help}
+ .pbar span{display:block;height:100%}
+ th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.65}
+ .ans{white-space:pre-wrap;background:#fffdf5;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px}
+ .key{font-size:12px;opacity:.7;margin-top:6px}
+ .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
+ details{margin-top:22px;background:#fffdf5;border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+ summary{cursor:pointer;font-weight:600;font-size:13px}
+ details p{font-size:13px;margin:10px 0 0}
+ details table{margin-top:10px}
+ details td:first-child{white-space:nowrap;opacity:.75}
+ .i{display:inline-block;width:15px;height:15px;text-align:center;
+    border:1.5px solid var(--ink);color:var(--ink);background:transparent;
+    border-radius:50%;font:700 10px/12px system-ui,sans-serif;
+    opacity:.55;cursor:help;margin-left:5px;position:relative;vertical-align:middle}
+ .i::before{content:'?'}
+ .i:hover,.i:focus{opacity:1;outline:none;background:var(--ink);color:var(--bg)}
+ .i:hover::after,.i:focus::after{content:attr(data-tip);position:absolute;left:50%;
+    transform:translateX(-50%);bottom:150%;width:250px;background:#2b2320;color:#fff5d1;
+    padding:9px 11px;border-radius:8px;z-index:20;text-align:left;white-space:pre-line;
+    font:400 12px/1.5 system-ui,sans-serif;text-transform:none;letter-spacing:0;
+    box-shadow:0 5px 18px rgba(0,0,0,.28)}
+ .i.r:hover::after,.i.r:focus::after{left:auto;right:-4px;transform:none}
+ /* Near the top of the page there is no room above, so open downwards. */
+ .i.d:hover::after,.i.d:focus::after{bottom:auto;top:150%}
+ /* Against the left edge, anchor left instead of centring. */
+ .i.l:hover::after,.i.l:focus::after{left:-4px;right:auto;transform:none}
+ /* A roomier one, for the note that explains the whole measurement. */
+ .i.wide:hover::after,.i.wide:focus::after{width:430px}
+</style>
+<header>
+<h1>Solar bot</h1>
+<div class="row strip">
+  <div class="card"><div class="lbl">now<i class="i d l" tabindex="0" data-tip="Total power the Pi's internal rails are drawing at this moment. Power is a rate, like speed: it says how fast energy is being used, not how much in total."></i></div><div class="big"><span id="now">-</span> W</div></div>
+  <div class="card"><div class="lbl">idle<i class="i d" tabindex="0" data-tip="What the Pi draws doing nothing: the quietest tenth of the last two minutes. Everything labelled 'cost of question' is measured against this baseline."></i></div><div class="big"><span id="idle">-</span> W</div></div>
+  <div class="card"><div class="lbl">peak (5 min)<i class="i d" tabindex="0" data-tip="Highest total power seen in the window shown in the live graph."></i></div><div class="big"><span id="peak">-</span> W</div></div>
+  <div class="card"><div class="lbl">cpu now<i class="i d" tabindex="0" data-tip="The VDD_CORE rail on its own, which is the processor. This is where the language model actually does its work, so it is the part that jumps when the bot thinks."></i></div><div class="big"><span id="core">-</span> W</div></div>
+  <div class="card"><div class="lbl">panel in<i class="i d" tabindex="0" data-tip="What the solar panel is delivering right now, measured by the INA219 on the charge input. Compare it with 'now': if this is the smaller number, the bot is running the battery down even while it charges."></i></div>
+    <div class="big"><span id="pw">-</span> W<span class="sub"><span id="pv">-</span> V</span></div></div>
+  <div class="card"><div class="lbl">battery <span id="bstate" style="text-transform:none"></span><i class="i r d" tabindex="0" data-tip="Charge and terminal voltage as reported by the PiSugar. The percentage is derived from voltage, not from counting energy, so it dips when the bot works hard and recovers afterwards. Treat it as an indication, not a measurement."></i></div>
+    <div class="big"><span id="blvl">-</span> %<span class="sub"><span id="bv">-</span> V</span></div></div>
+</div>
+<nav class="tabs">
+  <button data-tab="live">Live</button>
+  <button data-tab="static">Static</button>
+  <button data-tab="report" class="apart">Report</button>
+  <button data-tab="calib">Calibration</button>
+</nav>
+</header>
+
+<section id="tab-live" class="panel">
+<div class="row" style="margin-bottom:10px;align-items:center;gap:8px">
+  <div style="flex:0 0 auto"><span class="lbl">show energy as</span>
+    <select id="unit" style="margin-left:6px">
+      <option value="J">joules (J)</option>
+      <option value="mWh">milliwatt-hours (mWh)</option>
+      <option value="mAh">milliamp-hours (mAh)</option>
+      <option value="pct">% of a full battery</option>
+      <option value="sun">seconds of sunshine</option>
+    </select></div>
+  <div id="panelbox" style="flex:0 0 auto"><span class="lbl">solar panel</span><i class="i d" tabindex="0" data-tip="The rated power of your panel, in watts. Used only for the 'seconds of sunshine' unit: the energy of a question divided by this number.
+
+Look on the back of the panel or on its packaging. If it lists volts and amps instead, multiply them: 6 V at 1 A is 6 W.
+
+Note that the rating is for full sun, straight on. In practice you get less, so the seconds shown are a best case and the real time is longer. Measuring the panel input with a sensor would give the true figure."></i>
+    <input id="panel" type="number" min="0.1" step="0.5" value="5" style="width:70px;margin-left:6px"> W</div>
+  <div class="key" id="unitnote" style="margin:0"></div>
+  <div style="margin-left:auto;flex:0 0 auto"><span class="lbl">what is measured</span><i class="i r d wide" tabindex="0" data-tip="Measured from the Raspberry Pi 5's own PMIC, which reports voltage and current for the board's internal rails. The Pi measures itself, no external sensor is involved.
+
+What you see is the processor, the memory and the wifi chip. That is where the thinking happens. The green line is VDD_CORE, the processor on its own.
+
+Not included: the Whisplay HAT with its screen backlight, speaker and microphone; anything on USB; the PiSugar stepping 3.7 V up to 5 V, which costs roughly 10 to 15 percent; and the Pi's own conversion down to each rail.
+
+So the real drain on the battery is higher than the joules shown here, by an amount that has not been measured. Figures given as a percentage of a full battery come from those same joules, so they are a lower bound too.
+
+To get the true battery cost, either put a sensor in the battery lead, or run a calibration on the Calibration tab."></i></div>
+</div>
+<canvas id="c" width="1200" height="440"></canvas>
+<div class="key"><span class="sw" style="background:#d2691e"></span>total used
+  <span class="sw" style="background:#3a7d6c;margin-left:12px"></span>cpu only (VDD_CORE)
+  <span class="sw" style="background:#c9a227;margin-left:12px"></span>coming in from the panel
+  <span style="margin-left:16px">bot phases:</span>
+  <span class="sw" style="background:rgba(74,160,90,.55)"></span>listening
+  <span class="sw" style="background:rgba(62,110,190,.55);margin-left:8px"></span>transcribing
+  <span class="sw" style="background:rgba(210,105,30,.6);margin-left:8px"></span>answering</div>
+
+<details id="askbox">
+<summary>Ask a question from here</summary>
+<div class="key">Sends one question straight to Ollama and measures just that answer. Handy for putting two
+  models side by side without holding the button.</div>
+<div class="row" style="margin-top:10px;align-items:flex-start">
+  <div style="flex:1 1 420px">
+    <div class="lbl" style="margin-bottom:4px">question</div>
+    <textarea id="q">What is solar power, in two sentences?</textarea>
+  </div>
+  <div style="flex:0 1 240px">
+    <div class="lbl" style="margin-bottom:4px">model</div>
+    <select id="m" style="width:100%"></select>
+  </div>
+  <div style="flex:0 0 auto">
+    <div class="lbl" style="margin-bottom:4px">&nbsp;</div>
+    <button id="go">Ask &amp; measure</button>
+  </div>
+</div>
+<div class="key"><label><input type="checkbox" id="sys" checked> use the same system prompt as the bot
+  <span id="syslen"></span></label></div>
+<div id="out"></div>
+</details>
+
+</section>
+
+<section id="tab-static" class="panel" hidden>
+<h2>Cost against duration</h2>
+<div class="key">One dot per question: how long it took against what it cost. The numbers match the list
+  below. Hover a dot to see the question.</div>
+<div id="scatter"></div>
+
+<h2 style="margin-top:26px">Questions asked on the device</h2>
+<div class="key">Every time you hold the button on the bot, the whole cycle is logged here with the model
+  that was loaded when it answered. Saved to disk, so restarts do not lose it.</div>
+<div id="qlog"></div>
+<div class="key" id="files"></div>
+</section>
+
+<section id="tab-calib" class="panel" hidden>
+<h2>Battery calibration</h2>
+<div class="key">The meter reads the Pi's internal rails, so it under-reports what the battery actually gives up.
+  Unplug the power, reset below, ask a few dozen questions, and the charge the PiSugar loses against the
+  joules counted here gives the correction factor.</div>
+<div class="row" style="margin-top:12px">
+  <div class="card"><div class="lbl">session length<i class="i d l" tabindex="0" data-tip="Time since you last pressed Reset session."></i></div><div class="big"><span id="slen">-</span></div></div>
+  <div class="card"><div class="lbl">measured<i class="i d" tabindex="0" data-tip="Every joule the meter has counted since the reset, from the Pi's internal rails only."></i></div><div class="big"><span id="sj">-</span></div></div>
+  <div class="card"><div class="lbl">battery drop<i class="i d" tabindex="0" data-tip="Percentage points the PiSugar has fallen since the reset. Because that percentage comes from voltage, it wanders on its own, which is why a calibration needs a large drop before it means anything."></i></div><div class="big"><span id="sdrop">-</span> %</div></div>
+  <div class="card"><div class="lbl">energy from battery<i class="i d" tabindex="0" data-tip="That percentage drop turned into joules, assuming a full pack of 1200 mAh at 3.7 V, which is about 15980 J. This is what the battery is estimated to have actually handed over."></i></div><div class="big"><span id="sbj">-</span></div></div>
+  <div class="card"><div class="lbl">correction factor<i class="i r d" tabindex="0" data-tip="Energy from battery divided by measured: how many joules the battery gives up for each joule the rails use. It has to be above 1, because the battery also pays for the screen, the speaker and the conversion losses. A result below 1 is shown as a warning instead, since it cannot be real."></i></div><div class="big"><span id="sfac">-</span></div></div>
+</div>
+<div class="key" id="snote"></div>
+<div style="margin-top:16px"><button id="reset">Reset session</button></div>
+</section>
+
+<section id="tab-report" class="panel" hidden>
+<div class="row" style="align-items:center;margin-bottom:6px">
+  <h2 style="margin:0">Report</h2>
+  <div style="margin-left:auto"><a id="dl" class="btn" download="solarbot-energy-report.html">Download</a></div>
+</div>
+<div id="reportbody"></div>
+</section>
+
+<script>
+const $=id=>document.getElementById(id);
+let data=[],phases=[],BAT={j:15984,mah:1200,v:3.7};
+
+// Every energy number the server sends is in joules. These are all just
+// rescalings of the same measurement, for whoever is reading the page.
+const UNITS={
+  J  :{lbl:'J',   d:1, f:j=>j},
+  mWh:{lbl:'mWh', d:2, f:j=>j/3.6},
+  mAh:{lbl:'mAh', d:3, f:j=>j/BAT.v/3.6},
+  pct:{lbl:'%',   d:3, f:j=>j/BAT.j*100},
+  sun:{lbl:'s',   d:1, f:j=>j/Math.max(0.1,parseFloat($('panel').value)||5)}
+};
+const U=()=>UNITS[$('unit').value]||UNITS.J;
+const fmtE=j=>{if(j==null||isNaN(j))return '-';const u=U();return u.f(j).toFixed(u.d)+' '+u.lbl;};
+function unitNote(){
+  const v=$('unit').value;
+  // The panel rating only feeds the sunshine unit, so it only appears there.
+  $('panelbox').style.display = (v==='sun') ? '' : 'none';
+  $('unitnote').textContent =
+    v==='J'  ?'1 joule is 1 watt for 1 second.':
+    v==='mWh'?'What batteries and electricity bills use. 1 Wh = 3600 J.':
+    v==='mAh'?'Phone-battery units, at '+BAT.v+' V nominal. The pack holds '+BAT.mah+' mAh.':
+    v==='pct'?'Share of one full charge of the '+BAT.mah+' mAh pack ('+Math.round(BAT.j)+' J).':
+              'How long the panel would need to make it, at its rated output.';
+}
+const PH={
+  listening     :{n:'listening',    c:'rgba(74,160,90,.20)', t:'#2f6b3c'},
+  wake_listening:{n:'listening',    c:'rgba(74,160,90,.20)', t:'#2f6b3c'},
+  detecting     :{n:'detecting',    c:'rgba(74,160,90,.10)', t:'#2f6b3c'},
+  asr           :{n:'transcribing', c:'rgba(62,110,190,.20)',t:'#2b4c86'},
+  answer        :{n:'answering',    c:'rgba(210,105,30,.24)',t:'#9c4c14'},
+  image         :{n:'image',        c:'rgba(150,90,180,.18)',t:'#6b3f80'},
+  sleep         :{n:'',             c:null,                  t:''}
+};
+async function poll(){
+  try{
+    const r=await fetch('api/samples');const j=await r.json();
+    data=j.samples;phases=j.states||[];
+    const last=data[data.length-1];
+    if(last){$('now').textContent=last[1].toFixed(2);$('core').textContent=last[2].toFixed(2);}
+    $('idle').textContent=j.idle.toFixed(2);
+    $('peak').textContent=(data.reduce((a,s)=>Math.max(a,s[1]),0)).toFixed(2);
+    const p=j.panel||{};
+    $('pw').textContent=p.watts==null?'-':p.watts.toFixed(p.watts<1?3:2);
+    $('pv').textContent=p.volts==null?'-':p.volts.toFixed(2);
+    const b=j.battery||{};
+    $('blvl').textContent=b.level==null?'-':b.level.toFixed(1);
+    $('bv').textContent=b.volts==null?'-':b.volts.toFixed(3);
+    $('bstate').textContent=!b.ok?'(no PiSugar)':(b.charging?'· charging':(b.plugged?'· plugged in':'· on battery'));
+    showSession(j.session||{});
+    draw();
+  }catch(e){}
+}
+function showSession(s){
+  const hms=x=>{x=Math.round(x);const h=Math.floor(x/3600),m=Math.floor(x%3600/60);
+    return h?h+'h '+m+'m':(m?m+'m '+(x%60)+'s':x+'s');};
+  $('slen').textContent=s.seconds?hms(s.seconds):'-';
+  $('sj').textContent=s.measured_joules==null?'-':fmtE(s.measured_joules);
+  $('sdrop').textContent=s.drop==null?'-':s.drop.toFixed(2);
+  $('sbj').textContent=s.battery_joules==null?'-':fmtE(s.battery_joules);
+  $('sfac').textContent=s.factor==null?'-':('x'+s.factor.toFixed(2));
+  const min=s.min_drop||5;
+  let n='';
+  if(s.plugged===true) n='Plugged in, so the battery is not discharging. Unplug to run a calibration.';
+  else if(s.drop==null) n='Waiting for a battery reading.';
+  else if(s.drop<min) n='Battery has dropped '+s.drop.toFixed(2)+' % so far. A calibration needs at least '+
+    min+' %, because the PiSugar reads charge from voltage and voltage sags under load, which moves the '+
+    'number by several points on its own. Expect this to take a while.';
+  else if(s.suspect) n='That works out below 1, which cannot be right: the battery also pays for the screen, '+
+    'the speaker and the conversion losses, so it must give up more than the rails use. The percentage is '+
+    'not tracking energy over this window. A lithium cell holds about 3.8 V across most of its range, so in '+
+    'the middle the reading barely moves. Run a longer and deeper discharge.';
+  else if(s.factor!=null) n='Every joule this meter reports is about '+s.factor.toFixed(2)+
+    ' joules out of the battery. So a 10 J answer really costs roughly '+(10*s.factor).toFixed(0)+' J of charge.';
+  $('snote').textContent=n;
+}
+$('reset').onclick=async()=>{
+  try{const r=await fetch('api/session/reset',{method:'POST'});showSession(await r.json());}catch(e){}
+};
+function draw(){
+  const c=$('c'),x=c.getContext('2d');
+  // Match the backing store to the size the canvas is actually shown at,
+  // otherwise the drawing gets stretched to fit and everything looks squashed.
+  const dpr=window.devicePixelRatio||1;
+  const W=c.clientWidth||900,H=c.clientHeight||300;
+  if(c.width!==Math.round(W*dpr)||c.height!==Math.round(H*dpr)){
+    c.width=Math.round(W*dpr);c.height=Math.round(H*dpr);
+  }
+  x.setTransform(dpr,0,0,dpr,0,0);   // from here on, work in CSS pixels
+  x.clearRect(0,0,W,H);
+  if(data.length<2)return;
+  const t0=data[0][0],t1=data[data.length-1][0],span=Math.max(1,t1-t0);
+  const peak=Math.max(10,data.reduce((a,s)=>Math.max(a,s[1],s[3]||0),0)*1.15);
+  const B=30;   // room along the bottom for clock labels
+  const px=t=>(t-t0)/span*W, py=w=>H-B-(w/peak)*(H-B);
+  for(let i=0;i<phases.length;i++){
+    const p=PH[phases[i][1]];if(!p||!p.c)continue;
+    const a=Math.max(0,px(phases[i][0]));
+    const b=i+1<phases.length?px(phases[i+1][0]):W;
+    if(b<=a)continue;
+    x.fillStyle=p.c;x.fillRect(a,0,b-a,H);
+    if(b-a>62&&p.n){x.fillStyle=p.t;x.font='600 12px system-ui';x.fillText(p.n,a+6,17);}
+  }
+  x.strokeStyle='#e0d5b0';x.lineWidth=1;x.font='11px system-ui';x.fillStyle='#9a8a6a';
+  const step=peak>24?4:2;
+  for(let w=0;w<=peak;w+=step){x.beginPath();x.moveTo(0,py(w));x.lineTo(W,py(w));x.stroke();x.fillText(w+' W',6,py(w)-3);}
+  // Clock along the bottom, so you can tell how much time the window covers.
+  x.strokeStyle='#c9b98a';x.beginPath();x.moveTo(0,H-B);x.lineTo(W,H-B);x.stroke();
+  x.textAlign='center';
+  for(let i=0;i<=4;i++){
+    const t=t0+span*i/4,xp=Math.min(W-30,Math.max(30,px(t)));
+    x.fillText(new Date(t*1000).toLocaleTimeString(),xp,H-8);
+  }
+  x.textAlign='left';
+  const line=(idx,col)=>{x.beginPath();x.strokeStyle=col;x.lineWidth=2;
+    data.forEach((s,i)=>i?x.lineTo(px(s[0]),py(s[idx])):x.moveTo(px(s[0]),py(s[idx])));x.stroke();};
+  line(2,'#3a7d6c');line(3,'#c9a227');line(1,'#d2691e');
+}
+async function models(){
+  try{
+    const r=await fetch('api/models');const j=await r.json();
+    if(j.battery_joules){BAT={j:j.battery_joules,mah:j.battery_mah,v:j.battery_volts};}
+    unitNote();
+    const bot=j.bot_model||'';
+    $('m').innerHTML=j.models.map(n=>{
+      const isBot=(n===bot||n===bot+':latest'||n.replace(/:latest$/,'')===bot);
+      return '<option value="'+n+'"'+(isBot?' selected':'')+'>'+n+(isBot?'  (the bot uses this)':'')+'</option>';
+    }).join('');
+    $('syslen').textContent=j.system_chars?'('+j.system_chars+' chars from .env)':'(none found in .env)';
+    if(!j.system_chars){$('sys').checked=false;$('sys').disabled=true;}
+  }catch(e){}
+}
+const esc=s=>(s||'').replace(/[<>&]/g,ch=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[ch]));
+
+// Column explanations, so the page can be read without anyone explaining it.
+const TIP={
+ model:'Which model was loaded in Ollama when this answer was produced, asked of Ollama itself rather than read from the config.',
+ source:'Whether the bot was on mains power or running from the battery when this question was asked.',
+ batt:'Battery level at the moment the question started.',
+ dur:'How long the whole cycle took, from pressing the button to the answer being finished.',
+ total:'All the energy that flowed during the question, including the part the bot would have used anyway just by being switched on.',
+ cost:'The extra energy this question added on top of simply being switched on: total energy minus idle power times duration. This is the price of the question itself, and the number to use when comparing models.',
+ peak:'The highest power reached at any moment during the question.',
+ listening:'Recording your voice while the button is held. Almost free.',
+ transcribing:'faster-whisper turning that recording into text.',
+ answering:'The language model producing an answer and piper speaking it. Usually nearly all of the cost.',
+ cpu:'The share of the energy that went through VDD_CORE, the processor rail. The thinking itself.',
+ tokens:'How many tokens the model generated. Energy scales almost directly with this.',
+ route:'Which Ollama endpoint answered. Models without a chat template fall back from /api/chat to /api/generate.',
+ sysprompt:'Whether the bot\\u2019s own system prompt was sent along. It changes the length of the answer, and therefore the energy.',
+ tottime:'All the question cycles added up: how long the bot has spent listening, transcribing and answering in total.',
+ totcost:'The cost of every question added up, excluding what the bot would have used sitting idle anyway.',
+ phases:'How the time split across the three phases, in the same colours as the live graph: green listening, blue transcribing, orange answering. Hover the bar for the exact seconds and energy.'
+};
+const tip=(t,cls)=>'<i class="i'+(cls?' '+cls:'')+'" tabindex="0" data-tip="'+esc(t)+'"></i>';
+const th=(label,key,cls)=>'<th>'+label+(TIP[key]?tip(TIP[key],cls):'')+'</th>';
+// Numeric columns: the heading is right-aligned too, so it sits above its own figure.
+const thn=(label,key,cls)=>'<th class="n">'+label+(TIP[key]?tip(TIP[key],cls):'')+'</th>';
+let lastAsk=null;
+function renderAsk(){
+  const j=lastAsk;if(!j)return;
+  $('out').innerHTML='<table>'+
+    '<tr>'+th('model','model')+thn('duration','dur')+thn('peak','peak')+thn('total energy','total')+
+    thn('cost of question','cost')+thn('of which cpu','cpu')+
+    thn('tokens','tokens')+th('route','route','r')+th('system prompt','sysprompt','r')+'</tr>'+
+    '<tr><td>'+esc(j.model)+'</td><td class="n">'+j.seconds.toFixed(2)+' s</td>'+
+    '<td class="n">'+j.peak_watts.toFixed(2)+' W</td>'+
+    '<td class="n">'+fmtE(j.joules)+'</td><td class="n"><b>'+fmtE(j.joules_above_idle)+'</b></td>'+
+    '<td class="n">'+fmtE(j.joules_core)+'</td>'+
+    '<td class="n">'+(j.tokens==null?'-':j.tokens)+'</td><td>'+j.endpoint+'</td>'+
+    '<td>'+(j.used_system?'yes':'no')+'</td></tr></table>'+
+    '<div class="ans">'+esc(j.answer)+'</div>';
+}
+$('go').onclick=async()=>{
+  $('go').disabled=true;$('go').textContent='measuring...';
+  try{
+    const r=await fetch('api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:$('m').value,prompt:$('q').value,use_system:$('sys').checked})});
+    const j=await r.json();
+    lastAsk=j;renderAsk();$('askbox').open=true;
+  }catch(e){$('out').textContent='error: '+e;}
+  $('go').disabled=false;$('go').textContent='Ask & measure';
+};
+const clock=t=>new Date(t*1000).toLocaleTimeString();
+// Seconds into something readable: 42 s, 3 m 07 s, 1 h 12 m.
+function fmtT(x){
+  x=Math.round(x||0);
+  if(x<60) return x+' s';
+  if(x<3600) return Math.floor(x/60)+' m '+String(x%60).padStart(2,'0')+' s';
+  return Math.floor(x/3600)+' h '+String(Math.floor(x%3600/60)).padStart(2,'0')+' m';
+}
+let lastQ=[];
+
+// Colours are assigned in the order models first appear, so a run with one
+// model stays plain and a comparison run separates itself.
+const PALETTE=['#d2691e','#3e6ebe','#4aa05a','#9c4bb0','#c2255c','#0f8a8a','#8a6d1f'];
+function modelColours(rows){
+  const m={},out={};let i=0;
+  rows.forEach(q=>{const k=q.model||'?';if(!(k in m)){m[k]=PALETTE[i%PALETTE.length];i++;}});
+  Object.keys(m).forEach(k=>out[k]=m[k]);
+  return out;
+}
+// Round an axis maximum up to something a person would choose.
+function niceMax(v){
+  if(!(v>0)) return 1;
+  const p=Math.pow(10,Math.floor(Math.log10(v)));
+  for(const s of [1,1.5,2,2.5,3,4,5,7.5,10]) if(v<=s*p) return s*p;
+  return 10*p;
+}
+function renderScatter(){
+  const box=$('scatter');
+  if(!lastQ.length){box.innerHTML='<div class="key">Nothing to plot yet.</div>';return;}
+  // Oldest first, so the numbers follow the order you asked them.
+  const pts=lastQ.slice().sort((a,b)=>a.t-b.t)
+    .map((q,i)=>({n:i+1,q,x:U().f(q.above_idle),y:q.total.seconds}));
+  const cols=modelColours(pts.map(p=>p.q));
+  const W=1100,H=340,L=64,R=20,T=18,B=48;
+  const xm=niceMax(Math.max(...pts.map(p=>p.x))),ym=niceMax(Math.max(...pts.map(p=>p.y)));
+  const px=v=>L+(v/xm)*(W-L-R), py=v=>H-B-(v/ym)*(H-T-B);
+  let g='';
+  for(let i=0;i<=5;i++){
+    const xv=xm*i/5,yv=ym*i/5;
+    g+='<line x1="'+px(xv)+'" y1="'+T+'" x2="'+px(xv)+'" y2="'+(H-B)+'" stroke="#e6dcc0"/>'+
+       '<text x="'+px(xv)+'" y="'+(H-B+18)+'" text-anchor="middle" font-size="11" fill="#9a8a6a">'+
+       (+xv.toFixed(xm<10?2:0))+'</text>'+
+       '<line x1="'+L+'" y1="'+py(yv)+'" x2="'+(W-R)+'" y2="'+py(yv)+'" stroke="#e6dcc0"/>'+
+       '<text x="'+(L-8)+'" y="'+(py(yv)+4)+'" text-anchor="end" font-size="11" fill="#9a8a6a">'+
+       (+yv.toFixed(ym<10?1:0))+'</text>';
+  }
+  const dots=pts.map(p=>{
+    const c=cols[p.q.model||'?'];
+    return '<g class="dot" data-n="'+p.n+'">'+
+      '<circle cx="'+px(p.x)+'" cy="'+py(p.y)+'" r="7" fill="'+c+'" fill-opacity=".75" stroke="'+c+'"/>'+
+      '<text x="'+px(p.x)+'" y="'+(py(p.y)-12)+'" text-anchor="middle" font-size="10" fill="#6b5b3a">'+p.n+'</text>'+
+      '<title>'+esc('#'+p.n+'  '+(p.q.text||'(not transcribed)')+'\\n'+(p.q.model||'?')+
+        '\\n'+fmtE(p.q.above_idle)+'  ·  '+p.y.toFixed(1)+' s')+'</title></g>';
+  }).join('');
+  const legend=Object.keys(cols).map(k=>
+    '<span class="sw" style="background:'+cols[k]+'"></span>'+esc(k)).join(' &nbsp; ');
+  box.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block;'+
+    'background:#fffdf5;border:1px solid #c9b98a;border-radius:10px">'+g+
+    '<line x1="'+L+'" y1="'+T+'" x2="'+L+'" y2="'+(H-B)+'" stroke="#c9b98a"/>'+
+    '<line x1="'+L+'" y1="'+(H-B)+'" x2="'+(W-R)+'" y2="'+(H-B)+'" stroke="#c9b98a"/>'+
+    '<text x="'+((L+W-R)/2)+'" y="'+(H-6)+'" text-anchor="middle" font-size="12" fill="#6b5b3a">'+
+    'cost of question ('+U().lbl+')</text>'+
+    '<text transform="translate(16,'+((T+H-B)/2)+') rotate(-90)" text-anchor="middle" '+
+    'font-size="12" fill="#6b5b3a">duration (seconds)</text>'+
+    dots+'</svg><div class="key">'+legend+'</div>';
+}
+function renderQ(){
+  if(!lastQ.length){
+    $('qlog').innerHTML='<div class="key">Nothing yet. Hold the button on the bot and ask something.</div>';
+    return;
+  }
+  // The three phases as one stacked bar, in the same colours as the live graph.
+  const PH_COL={listening:'#4aa05a',transcribing:'#3e6ebe',answering:'#d2691e'};
+  const phBar=q=>{
+    const p=q.phases,names=['listening','transcribing','answering'];
+    const tot=Math.max(0.001,names.reduce((s,n)=>s+(p[n]||{}).seconds,0));
+    const tt=names.map(n=>n+' '+(p[n]||{}).seconds.toFixed(1)+' s, '+fmtE((p[n]||{}).joules)).join('\\n');
+    return '<div class="pbar" title="'+esc(tt)+'">'+names.map(n=>
+      '<span style="width:'+((p[n]||{}).seconds/tot*100).toFixed(1)+'%;background:'+PH_COL[n]+'"></span>'
+    ).join('')+'</div>';
+  };
+  // Same numbering as the scatter plot: oldest question is 1.
+  const nr=new Map();
+  lastQ.slice().sort((a,b)=>a.t-b.t).forEach((q,i)=>nr.set(q.t,i+1));
+  const by={};
+  lastQ.forEach(q=>{const k=q.source||'unknown';(by[k]=by[k]||[]).push(q);});
+  const sum=Object.keys(by).sort().map(k=>{
+    const a=by[k],n=a.length;
+    const tot=a.reduce((s,q)=>s+q.total.seconds,0);
+    const totJ=a.reduce((s,q)=>s+q.above_idle,0);
+    return '<tr><td>'+k+'</td><td class="n">'+n+'</td><td class="n">'+fmtT(tot)+'</td>'+
+           '<td class="n">'+(tot/n).toFixed(1)+' s</td><td class="n">'+fmtE(totJ)+'</td>'+
+           '<td class="n"><b>'+fmtE(totJ/n)+'</b></td></tr>';
+  }).join('');
+  const allT=lastQ.reduce((s,q)=>s+q.total.seconds,0);
+  const allJ=lastQ.reduce((s,q)=>s+q.above_idle,0);
+  $('qlog').innerHTML=
+    '<div class="key" style="font-size:14px;margin-bottom:2px"><b>'+lastQ.length+
+    ' question'+(lastQ.length===1?'':'s')+'</b> &middot; <b>'+fmtT(allT)+
+    '</b> spent answering in total &middot; <b>'+fmtE(allJ)+'</b> of question cost in total</div>'+
+    '<table><tr>'+th('power source','source')+'<th class="n">questions</th>'+
+    thn('total time','tottime')+thn('avg duration','dur')+thn('total cost','totcost')+
+    thn('avg cost of question','cost','r')+'</tr>'+sum+'</table>'+
+    '<table style="margin-top:30px"><tr><th>#</th><th>time</th><th>question</th>'+th('model','model')+th('source','source')+
+    thn('battery','batt')+thn('total','total')+thn('cost of question','cost')+
+    thn('peak','peak')+th('phases','phases','r')+'</tr>'+
+    lastQ.map(q=>'<tr>'+
+      '<td>'+(nr.get(q.t)||'')+'</td>'+
+      '<td>'+clock(q.t)+'</td>'+
+      '<td class="q">'+esc(q.text||'-')+'</td>'+
+      '<td>'+esc(q.model)+'</td>'+
+      '<td>'+esc(q.source||'-')+'</td>'+
+      '<td class="n">'+(q.battery_percent==null?'-':q.battery_percent.toFixed(1)+' %')+'</td>'+
+      '<td class="n">'+q.total.seconds.toFixed(1)+' s / '+fmtE(q.total.joules)+'</td>'+
+      '<td class="n"><b>'+fmtE(q.above_idle)+'</b></td>'+
+      '<td class="n">'+q.total.peak.toFixed(2)+' W</td>'+
+      '<td>'+phBar(q)+'</td>'+
+    '</tr>').join('')+'</table>'+
+    // Same key as under the live graph, so the bars read the same way.
+    '<div class="key" style="margin-top:8px">phases:'+
+    '<span class="sw" style="background:'+PH_COL.listening+';margin-left:10px"></span>listening'+
+    '<span class="sw" style="background:'+PH_COL.transcribing+';margin-left:12px"></span>transcribing'+
+    '<span class="sw" style="background:'+PH_COL.answering+';margin-left:12px"></span>answering'+
+    '</div>';
+}
+async function qlog(){
+  try{
+    const r=await fetch('api/questions');const j=await r.json();
+    lastQ=j.questions;renderQ();renderScatter();
+    if(!$('tab-report').hidden) loadReport();
+  }catch(e){}
+}
+const qs=()=>'unit='+encodeURIComponent($('unit').value)+
+             '&panel='+encodeURIComponent($('panel').value||'5');
+async function files(){
+  try{
+    const r=await fetch('api/files');const j=await r.json();
+    let h='';
+    if(j.files.length){
+      h='<b>Raw data:</b> '+j.files.map(f=>'<a href="download/'+encodeURIComponent(f.name)+
+         '">'+esc(f.name)+'</a> ('+f.kb+' kB)').join(' &middot; ')+
+         '<br><span style="opacity:.8">questions.jsonl is the same questions with every field kept; '+
+         'power-DATE.csv is one row per second of total and cpu watts.</span><br>';
+    }
+    h+='<span style="opacity:.8">Stored on the Pi in '+esc(j.dir)+'</span>';
+    $('files').innerHTML=h;
+  }catch(e){}
+}
+// The Report tab shows the finished document inline, so you can read it before
+// deciding to hand it over.
+// The report, rendered straight into the page so it scrolls with everything
+// else. The downloadable file is built separately on the server, from the same
+// numbers, so the two stay in step.
+function loadReport(){
+  $('dl').href='download/report.html?'+qs();
+  const box=$('reportbody');
+  if(!lastQ.length){box.innerHTML='<div class="key">No questions recorded yet. '+
+    'Hold the button on the bot and ask something.</div>';return;}
+  const rows=lastQ.slice().sort((a,b)=>b.t-a.t);
+  const group=(key)=>{
+    const by={};rows.forEach(q=>{const k=q[key]||'unknown';(by[k]=by[k]||[]).push(q);});
+    return by;
+  };
+  const allT=rows.reduce((s,q)=>s+q.total.seconds,0);
+  const allJ=rows.reduce((s,q)=>s+q.above_idle,0);
+
+  const bySrc=group('source');
+  const srcRows=Object.keys(bySrc).sort().map(k=>{
+    const a=bySrc[k],t=a.reduce((s,q)=>s+q.total.seconds,0),j=a.reduce((s,q)=>s+q.above_idle,0);
+    return '<tr><td>'+esc(k)+'</td><td class="n">'+a.length+'</td><td class="n">'+fmtT(t)+
+           '</td><td class="n">'+(t/a.length).toFixed(1)+' s</td><td class="n">'+fmtE(j)+
+           '</td><td class="n"><b>'+fmtE(j/a.length)+'</b></td></tr>';
+  }).join('');
+
+  const byMod=group('model');
+  const modRows=Object.keys(byMod).sort((a,b)=>byMod[b].length-byMod[a].length).map(k=>{
+    const a=byMod[k],j=a.reduce((s,q)=>s+q.above_idle,0);
+    return '<tr><td>'+esc(k)+'</td><td class="n">'+a.length+'</td>'+
+           '<td class="n"><b>'+fmtE(j/a.length)+'</b></td></tr>';
+  }).join('');
+
+  const PH_COL={listening:'#4aa05a',transcribing:'#3e6ebe',answering:'#d2691e'};
+  const cards=rows.map(q=>{
+    const bars=['listening','transcribing','answering'].map(n=>
+      '<span><span class="sw" style="background:'+PH_COL[n]+'"></span>'+n+': '+
+      (q.phases[n]||{}).seconds.toFixed(1)+' s, '+fmtE((q.phases[n]||{}).joules)+'</span>').join('');
+    return '<div class="rp"><div><span class="when">'+esc(q.iso||'')+'</span>'+
+      '<span class="tag">'+esc(q.model||'?')+'</span><span class="tag">'+esc(q.source||'?')+'</span>'+
+      (q.battery_percent==null?'':'<span class="tag">battery '+q.battery_percent.toFixed(1)+' %</span>')+
+      '</div><blockquote>'+esc(q.text||'(not transcribed)')+'</blockquote>'+
+      '<div class="cost"><b>'+fmtE(q.above_idle)+'</b> cost of this question'+
+      '<span class="sep">&middot;</span>'+q.total.seconds.toFixed(1)+' s'+
+      '<span class="sep">&middot;</span>peak '+q.total.peak.toFixed(2)+' W</div>'+
+      '<div class="bars">'+bars+'</div></div>';
+  }).join('');
+
+  box.innerHTML=
+    '<div class="key" style="font-size:14px">Generated from '+rows.length+' question'+
+    (rows.length===1?'':'s')+' &middot; <b>'+fmtT(allT)+'</b> spent answering in total &middot; <b>'+
+    fmtE(allJ)+'</b> of question cost in total &middot; energy shown in '+U().lbl+'</div>'+
+    '<h2 style="margin-top:22px">By power source</h2>'+
+    '<table><tr><th>source</th><th class="n">questions</th><th class="n">total time</th>'+
+    '<th class="n">avg duration</th><th class="n">total cost</th>'+
+    '<th class="n">avg cost of a question</th></tr>'+srcRows+'</table>'+
+    '<h2 style="margin-top:26px">By model</h2>'+
+    '<table><tr><th>model</th><th class="n">questions</th>'+
+    '<th class="n">avg cost of a question</th></tr>'+modRows+'</table>'+
+    '<h2 style="margin-top:26px">Every question</h2>'+cards+
+    '<h2 style="margin-top:26px">What these numbers mean</h2>'+
+    '<div class="key"><b>Cost of this question</b> is the energy the question '+
+    'added on top of simply having the bot switched on. The Pi draws about 2 W doing nothing, so a '+
+    'question that takes ten seconds spends roughly 20 J just existing. That part is subtracted, '+
+    'which leaves what the thinking actually cost.<br><br>'+
+    'Measured from the Raspberry Pi 5&rsquo;s own PMIC, which reports the board&rsquo;s internal '+
+    'rails: processor, memory, wifi. It does not include the Whisplay HAT&rsquo;s screen and speaker, '+
+    'anything on USB, or the PiSugar&rsquo;s conversion losses, so the real drain on the battery is '+
+    'somewhat higher.</div>';
+}
+function showTab(name){
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
+  document.querySelectorAll('.panel').forEach(p=>p.hidden=(p.id!=='tab-'+name));
+  try{localStorage.setItem('solarbot-tab',name);}catch(e){}
+  if(name==='report') loadReport();
+}
+const redraw=()=>{
+  unitNote();renderQ();renderScatter();renderAsk();poll();
+  if(!$('tab-report').hidden) loadReport();
+};
+$('unit').onchange=redraw;$('panel').oninput=redraw;
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+let startTab='live';
+try{startTab=localStorage.getItem('solarbot-tab')||'live';}catch(e){}
+if(!document.getElementById('tab-'+startTab)) startTab='live';
+showTab(startTab);
+models();poll();qlog();files();unitNote();
+setInterval(poll,1000);setInterval(qlog,2000);setInterval(files,30000);
+</script>
+"""
+
+
+def build_report(rows, unit="J", panel="5", toolbar=False):
+    """A standalone page you can open, read, hand over, or print to PDF.
+
+    The spreadsheet export is for analysis. This is for showing someone.
+    With toolbar=True it is served for viewing at /report and gets navigation
+    across the top; without, it is the file you download, which has to work
+    on its own once it leaves the Pi, so the links are left out.
+    """
+    try:
+        panel_w = max(0.1, float(panel))
+    except ValueError:
+        panel_w = 5.0
+    conv = {
+        "J":   ("J",   1, lambda j: j),
+        "mWh": ("mWh", 2, lambda j: j / 3.6),
+        "mAh": ("mAh", 3, lambda j: j / BATTERY_NOMINAL_V / 3.6),
+        "pct": ("% of a charge", 3, lambda j: j / BATTERY_JOULES * 100),
+        "sun": ("s of sun", 1, lambda j: j / panel_w),
+    }.get(unit, ("J", 1, lambda j: j))
+    lbl, dec, fn = conv
+
+    def e(j):
+        return "-" if j is None else ("%.*f %s" % (dec, fn(j), lbl))
+
+    esc = html.escape
+    by = {}
+    for r in rows:
+        by.setdefault(r.get("source") or "unknown", []).append(r)
+
+    def fmt_t(x):
+        x = int(round(x or 0))
+        if x < 60:
+            return "%d s" % x
+        if x < 3600:
+            return "%d m %02d s" % (x // 60, x % 60)
+        return "%d h %02d m" % (x // 3600, x % 3600 // 60)
+
+    summary = ""
+    for src in sorted(by):
+        a = by[src]
+        tot = sum(x.get("total", {}).get("seconds", 0) for x in a)
+        totj = sum(x.get("above_idle", 0) for x in a)
+        summary += ("<tr><td>%s</td><td>%d</td><td>%s</td><td>%.1f s</td>"
+                    "<td>%s</td><td><b>%s</b></td></tr>"
+                    % (esc(src), len(a), fmt_t(tot), tot / len(a),
+                       e(totj), e(totj / len(a))))
+
+    all_t = sum(x.get("total", {}).get("seconds", 0) for x in rows)
+    all_j = sum(x.get("above_idle", 0) for x in rows)
+
+    bar = ""
+    if toolbar:
+        qs = "unit=%s&panel=%s" % (urllib.parse.quote(unit), urllib.parse.quote(str(panel)))
+        units = " ".join(
+            '<a href="/report?unit=%s&panel=%s"%s>%s</a>'
+            % (u, urllib.parse.quote(str(panel)),
+               ' class="on"' if u == unit else "", name)
+            for u, name in (("J", "joules"), ("mWh", "mWh"), ("mAh", "mAh"),
+                            ("pct", "% of charge"), ("sun", "sun seconds")))
+        bar = ("""<nav>
+  <a href="/">&larr; back to the live meter</a>
+  <span class="units">show as: %s</span>
+  <span class="right">
+    <a href="/download/report.html?%s" download="solarbot-energy-report.html">download this report</a>
+    <button onclick="print()">print or save as PDF</button>
+  </span>
+</nav>""" % (units, qs))
+
+    models = {}
+    for r in rows:
+        models.setdefault(r.get("model") or "?", []).append(r.get("above_idle", 0))
+    permodel = ""
+    for m in sorted(models, key=lambda k: -len(models[k])):
+        v = models[m]
+        avg = sum(v) / len(v)
+        permodel += ("<tr><td>%s</td><td>%d</td><td><b>%s</b></td></tr>"
+                     % (esc(m), len(v), e(avg)))
+
+    items = ""
+    for r in reversed(rows):
+        p, tot = r.get("phases", {}), r.get("total", {})
+        bat = r.get("battery_percent")
+        items += """
+<article>
+  <header><span class="when">%s</span>
+    <span class="tag">%s</span><span class="tag">%s</span>%s</header>
+  <blockquote>%s</blockquote>
+  <div class="cost"><b>%s</b> <span>cost of this question</span>
+    <span class="sep">&middot;</span> %.1f s <span class="sep">&middot;</span> peak %.2f W</div>
+  <div class="bars">%s</div>
+</article>""" % (
+            esc(r.get("iso") or ""),
+            esc(r.get("model") or "?"),
+            esc(r.get("source") or "?"),
+            "" if bat is None else '<span class="tag">battery %.1f %%</span>' % bat,
+            esc(r.get("text") or "(not transcribed)"),
+            e(r.get("above_idle")),
+            tot.get("seconds", 0), tot.get("peak", 0),
+            "".join(
+                '<div class="bar"><span class="%s"></span><label>%s: %.1f s, %s</label></div>'
+                % (name, name, (p.get(name) or {}).get("seconds", 0),
+                   e((p.get(name) or {}).get("joules")))
+                for name in ("listening", "transcribing", "answering")),
+        )
+
+    return """<!doctype html>
+<meta charset="utf-8"><title>Solarbot energy report</title>
+<style>
+ body{font:15px/1.6 system-ui,sans-serif;color:#2b2320;background:#fff5d1;margin:0;padding:32px}
+ main{max-width:860px;margin:0 auto}
+ h1{font-size:26px;margin:0 0 4px} h2{font-size:17px;margin:30px 0 10px}
+ .sub{opacity:.7;font-size:13px;margin-bottom:24px}
+ table{border-collapse:collapse;width:100%%;font-size:14px;background:#fffdf5;
+       border:1px solid #c9b98a;border-radius:8px;overflow:hidden}
+ th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #e6dcc0}
+ th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.65}
+ tr:last-child td{border-bottom:0}
+ article{background:#fffdf5;border:1px solid #c9b98a;border-radius:10px;
+         padding:14px 16px;margin:10px 0;break-inside:avoid}
+ header{font-size:12px;opacity:.75;margin-bottom:8px}
+ .when{margin-right:8px}
+ .tag{display:inline-block;background:#f0e6c8;border-radius:20px;padding:1px 9px;margin-right:5px}
+ blockquote{margin:0 0 10px;font-size:17px;font-style:italic}
+ .cost{font-size:13px} .cost b{font-size:20px;font-style:normal}
+ .cost span{opacity:.7} .sep{margin:0 6px;opacity:.4}
+ .bars{margin-top:10px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px}
+ .bar{display:flex;align-items:center;gap:6px}
+ .bar span{width:11px;height:11px;border-radius:3px;display:inline-block}
+ .listening{background:#4aa05a}.transcribing{background:#3e6ebe}.answering{background:#d2691e}
+ .note{font-size:13px;opacity:.85}
+ nav{background:#fffdf5;border:1px solid #c9b98a;border-radius:10px;padding:9px 14px;
+     margin-bottom:22px;font-size:13px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+ nav a{color:inherit} nav .units a{margin-left:7px;opacity:.6;text-decoration:none}
+ nav .units a.on{opacity:1;font-weight:600;text-decoration:underline}
+ nav .right{margin-left:auto;display:flex;gap:12px;align-items:center}
+ nav button{font:inherit;border:1px solid #d2691e;background:#d2691e;color:#fff;
+            border-radius:7px;padding:5px 12px;cursor:pointer}
+ @media print{body{background:#fff;padding:0}article,table{border-color:#bbb}nav{display:none}}
+</style>
+<main>
+%s
+<h1>Solarbot energy report</h1>
+<div class="sub">Generated %s &middot; %d question%s logged &middot; energy shown in %s</div>
+
+<h2>Totals</h2>
+<p class="note"><b>%s</b> spent answering across all questions, costing <b>%s</b> in total
+on top of what the bot would have used sitting idle anyway.</p>
+
+<h2>By power source</h2>
+<table><tr><th>source</th><th>questions</th><th>total time</th><th>avg duration</th>
+<th>total cost</th><th>avg cost of a question</th></tr>%s</table>
+
+<h2>By model</h2>
+<table><tr><th>model</th><th>questions</th><th>avg cost of a question</th></tr>%s</table>
+
+<h2>Every question</h2>
+%s
+
+<h2>What these numbers mean</h2>
+<p class="note"><b>Cost of this question</b> is the energy the question added on top of
+simply having the bot switched on. The Pi draws about 2 W doing nothing, so a question
+that takes ten seconds spends roughly 20 J just existing. That part is subtracted, which
+leaves what the thinking actually cost.</p>
+<p class="note">Measured from the Raspberry Pi 5's own PMIC, which reports the board's
+internal rails: processor, memory, wifi. It does not include the Whisplay HAT's screen and
+speaker, anything on USB, or the PiSugar's conversion losses, so the real drain on the
+battery is somewhat higher.</p>
+</main>""" % (bar, time.strftime("%Y-%m-%d %H:%M"), len(rows),
+              "" if len(rows) == 1 else "s", esc(lbl),
+              fmt_t(all_t), e(all_j),
+              summary or "<tr><td colspan=6>nothing logged yet</td></tr>",
+              permodel or "<tr><td colspan=3>nothing logged yet</td></tr>",
+              items or "<p class='note'>No questions recorded yet.</p>")
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body, ctype):
+        body = body.encode() if isinstance(body, str) else body
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = self.path.split("?")[0].rstrip("/") or "/"
+        if path == "/":
+            return self._send(200, PAGE, "text/html; charset=utf-8")
+        if path == "/api/samples":
+            with samples_lock:
+                rows = [[round(t, 3), round(w, 4), round(c, 4), round(p, 4)]
+                        for t, w, c, p in samples]
+            t0 = rows[0][0] - 5 if rows else 0
+            with states_lock:
+                st = [[round(t, 3), n] for t, n in states if t >= t0]
+            with battery_lock:
+                bat = dict(battery)
+            with panel_lock:
+                pan = dict(panel)
+            pan["joules_in"] = round(joules_in, 1)
+            return self._send(200, json.dumps({"samples": rows,
+                                               "states": st,
+                                               "idle": round(idle_watts, 4),
+                                               "battery": bat,
+                                               "panel": pan,
+                                               "session": session_report()}),
+                              "application/json")
+        if path in ("/report", "/download/report.html"):
+            q = {}
+            if "?" in self.path:
+                for part in self.path.split("?", 1)[1].split("&"):
+                    k, _, v = part.partition("=")
+                    q[k] = urllib.parse.unquote_plus(v)
+            with questions_lock:
+                rows = list(questions)
+            return self._send(200, build_report(rows, q.get("unit", "J"),
+                                                q.get("panel", "5"),
+                                                toolbar=(path == "/report")),
+                              "text/html; charset=utf-8")
+        if path == "/download/questions.csv":
+            with questions_lock:
+                rows = list(questions)
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(["time", "question", "model", "power_source",
+                        "battery_percent", "battery_volts",
+                        "total_seconds", "total_joules", "question_cost_joules",
+                        "peak_watts", "idle_watts",
+                        "listening_seconds", "listening_joules",
+                        "transcribing_seconds", "transcribing_joules",
+                        "answering_seconds", "answering_joules",
+                        "cpu_joules"])
+            for q in rows:
+                p, tot = q.get("phases", {}), q.get("total", {})
+
+                def g(d, k):
+                    return (d or {}).get(k, "")
+
+                w.writerow([
+                    q.get("iso") or time.strftime("%Y-%m-%d %H:%M:%S",
+                                                  time.localtime(q.get("t", 0))),
+                    q.get("text", ""), q.get("model", ""),
+                    q.get("source", ""), q.get("battery_percent", ""),
+                    q.get("battery_volts", ""),
+                    g(tot, "seconds"), g(tot, "joules"), q.get("above_idle", ""),
+                    g(tot, "peak"), q.get("idle_watts", ""),
+                    g(p.get("listening"), "seconds"), g(p.get("listening"), "joules"),
+                    g(p.get("transcribing"), "seconds"), g(p.get("transcribing"), "joules"),
+                    g(p.get("answering"), "seconds"), g(p.get("answering"), "joules"),
+                    g(tot, "joules_core"),
+                ])
+            return self._send(200, buf.getvalue(), "text/csv; charset=utf-8")
+        if path.startswith("/download/"):
+            name = os.path.basename(path[len("/download/"):])
+            if name != "questions.jsonl" and not re.fullmatch(
+                    r"power-\d{4}-\d{2}-\d{2}\.csv", name):
+                return self._send(404, "not found", "text/plain")
+            try:
+                with open(os.path.join(DATA_DIR, name), "rb") as f:
+                    return self._send(200, f.read(), "text/plain; charset=utf-8")
+            except Exception:
+                return self._send(404, "no data yet", "text/plain")
+        if path == "/api/files":
+            try:
+                names = sorted(os.listdir(DATA_DIR))
+            except Exception:
+                names = []
+            out = []
+            for n in names:
+                try:
+                    out.append({"name": n,
+                                "kb": round(os.path.getsize(os.path.join(DATA_DIR, n)) / 1024, 1)})
+                except Exception:
+                    pass
+            return self._send(200, json.dumps({"dir": DATA_DIR, "files": out}),
+                              "application/json")
+        if path == "/api/questions":
+            with questions_lock:
+                rows = list(questions)[-40:]
+            return self._send(200, json.dumps({"questions": rows[::-1]}),
+                              "application/json")
+        if path == "/api/models":
+            return self._send(200, json.dumps({"models": ollama_models(),
+                                               "bot_model": BOT_MODEL,
+                                               "system_chars": len(BOT_SYSTEM),
+                                               "battery_joules": round(BATTERY_JOULES, 1),
+                                               "battery_mah": BATTERY_MAH,
+                                               "battery_volts": BATTERY_NOMINAL_V}),
+                              "application/json")
+        self._send(404, "not found", "text/plain")
+
+    def do_POST(self):
+        if self.path.split("?")[0].rstrip("/") == "/api/session/reset":
+            with battery_lock:
+                lvl = battery["level"]
+            with session_lock:
+                session.update({"t": time.time(), "joules": joules_total,
+                                "level": lvl})
+            return self._send(200, json.dumps(session_report()), "application/json")
+        if self.path.split("?")[0].rstrip("/") != "/api/ask":
+            return self._send(404, "not found", "text/plain")
+        n = int(self.headers.get("Content-Length") or 0)
+        req = json.loads(self.rfile.read(n) or b"{}")
+        model = req.get("model") or BOT_MODEL
+        prompt = req.get("prompt") or ""
+        use_system = bool(req.get("use_system")) and bool(BOT_SYSTEM)
+        system = BOT_SYSTEM if use_system else ""
+
+        base = idle_watts
+        t0 = time.time()
+        answer, endpoint, tokens = ollama_ask(model, prompt, system)
+        time.sleep(1.5 / SAMPLE_HZ)          # let the last sample land
+        t1 = time.time()
+
+        rows = window(t0, t1)
+        j_tot, j_core = energy(rows)
+        seconds = t1 - t0
+        self._send(200, json.dumps({
+            "seconds": seconds,
+            "peak_watts": max((r[1] for r in rows), default=0.0),
+            "joules": j_tot,
+            "joules_above_idle": max(0.0, j_tot - base * seconds),
+            "joules_core": j_core,
+            "idle_watts": base,
+            "tokens": tokens,
+            "endpoint": endpoint,
+            "model": model,
+            "used_system": use_system,
+            "answer": answer,
+        }), "application/json")
+
+
+if __name__ == "__main__":
+    os.makedirs(DATA_DIR, exist_ok=True)
+    load_questions()
+    print("Loaded %d earlier questions from %s" % (len(questions), QUESTIONS_FILE))
+    threading.Thread(target=sampler, daemon=True).start()
+    threading.Thread(target=log_tailer, daemon=True).start()
+    threading.Thread(target=battery_poller, daemon=True).start()
+    time.sleep(1.5)
+    print("Power meter on http://0.0.0.0:%d/" % PORT)
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
