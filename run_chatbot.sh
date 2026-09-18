@@ -64,6 +64,7 @@ get_env_value() {
 # load .env variables, exclude comments and empty lines
 # check if .env file exists
 initial_volume_level=114
+capture_level=75%
 serve_ollama=false
 if [ -f ".env" ]; then
   # Load only SERVE_OLLAMA from .env (ignore comments/other vars)
@@ -75,6 +76,9 @@ if [ -f ".env" ]; then
 
   INITIAL_VOLUME_LEVEL=$(get_env_value "INITIAL_VOLUME_LEVEL")
   [ -n "$INITIAL_VOLUME_LEVEL" ] && export INITIAL_VOLUME_LEVEL
+
+  CAPTURE_LEVEL=$(get_env_value "CAPTURE_LEVEL")
+  [ -n "$CAPTURE_LEVEL" ] && capture_level=$CAPTURE_LEVEL
 
   WHISPER_MODEL_SIZE=$(get_env_value "WHISPER_MODEL_SIZE")
   [ -n "$WHISPER_MODEL_SIZE" ] && export WHISPER_MODEL_SIZE
@@ -100,6 +104,17 @@ fi
 # Adjust initial volume (Linux only)
 if [ "$audio_supported" = true ]; then
   amixer -c $card_index set Speaker $initial_volume_level
+
+  # Capture path. The WM8960 input boost is not reliably restored at boot:
+  # alsa-restore runs before wm8960-soundcard.service has created the card,
+  # so the codec is left at its generic defaults with the mic gain at zero.
+  # Set it explicitly here, the same way the speaker level is set above.
+  amixer -c $card_index sset 'Left Input Boost Mixer LINPUT1' 3 >/dev/null 2>&1
+  amixer -c $card_index sset 'Right Input Boost Mixer RINPUT1' 3 >/dev/null 2>&1
+  amixer -c $card_index sset 'Left Boost Mixer LINPUT1' on >/dev/null 2>&1
+  amixer -c $card_index sset 'Right Boost Mixer RINPUT1' on >/dev/null 2>&1
+  amixer -c $card_index sset 'Capture' "$capture_level" >/dev/null 2>&1
+  echo "Capture path configured on card $card_index (level $capture_level)"
 fi
 
 if [ "$serve_ollama" = true ]; then
