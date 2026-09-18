@@ -49,8 +49,8 @@ echo "Creating systemd service file..."
 sudo tee /etc/systemd/system/chatbot.service > /dev/null <<EOF
 [Unit]
 Description=Chatbot Service
-After=network.target sound.target
-Wants=sound.target
+After=network-online.target ollama.service docker.service wm8960-soundcard.service sound.target
+Wants=network-online.target sound.target ollama.service wm8960-soundcard.service
 
 [Service]
 Type=simple
