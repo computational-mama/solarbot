@@ -256,9 +256,14 @@ export default class VectorDB implements VectorDBClass {
   ) => {
     console.log("Create collection:", collectionName);
     await this.client.createCollection(collectionName, {
+      // Named "dense" to match upsertPoints and search, which both address the
+      // dense vector by that name. Creating it unnamed made Qdrant reject every
+      // query with "Not existing vector name error: dense".
       vectors: {
-        size: vectorSize,
-        distance: distance,
+        dense: {
+          size: vectorSize,
+          distance: distance,
+        },
       },
       sparse_vectors: {
         bm25: { modifier: "idf" },
@@ -288,9 +293,11 @@ export default class VectorDB implements VectorDBClass {
       wait: true,
       points: points.map((p) => ({
         id: p.id,
+        // Always write the dense vector under its name, with or without the
+        // sparse one, so the collection layout stays the same either way.
         vector: p.sparseVector
           ? { dense: p.vector, bm25: p.sparseVector }
-          : p.vector,
+          : { dense: p.vector },
         payload: p.payload,
       })),
     });
@@ -316,7 +323,8 @@ export default class VectorDB implements VectorDBClass {
     }
 
     const searchParams: any = {
-      vector: queryVector,
+      // Named form, because the collection's dense vector is called "dense".
+      vector: { name: "dense", vector: queryVector },
       limit: limit,
       with_payload: true,
     };
