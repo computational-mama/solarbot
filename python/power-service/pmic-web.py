@@ -71,6 +71,33 @@ INA219_SHUNT_OHMS = float(env("INA219_SHUNT_OHMS", "0.1"))
 PISUGAR = (env("PISUGAR_HOST", "127.0.0.1"), int(env("PISUGAR_PORT", "8423")))
 BATTERY_MAH = int(env("BATTERY_MAH", "1200"))
 BATTERY_NOMINAL_V = float(env("BATTERY_NOMINAL_V", "3.7"))
+
+# The cloud comparison.
+#
+# ecocost turns a model name and a token count into an estimate of what that
+# question would have cost in a data centre. It cannot measure anything, it
+# cannot be told what was measured here, and it has never heard of the half
+# billion parameter model this bot runs. So it is only ever used the other way
+# round: to price the same question as if it had been asked of a cloud model,
+# next to the joules that were actually spent answering it here.
+#
+# Everything it needs ships inside the package, so it keeps working with no
+# network, which on this Pi is the normal state rather than the exception.
+try:
+    import ecocost
+except Exception:                                    # not installed, or broken
+    ecocost = None
+
+COMPARE_MODEL = env("COMPARE_MODEL", "gpt-4o")
+# The question log records how long the answering phase lasted but not how many
+# tokens came out of it, so the count is derived from a rate. Measured on this
+# Pi through /api/ask: qwen2.5:0.5b produces about 13 tokens a second. Measure
+# it again with the ask panel if the model changes, and set the variable.
+TOKENS_PER_SECOND = float(env("TOKENS_PER_SECOND", "13.3"))
+# Rough across English prose, and only ever used for the question and the
+# system prompt, which are both short enough that the error stays small next to
+# the factor-of-eighteen uncertainty in the estimate itself.
+CHARS_PER_TOKEN = 4.0
 BATTERY_JOULES = BATTERY_MAH / 1000 * 3600 * BATTERY_NOMINAL_V   # about 15980 J
 
 # How far the battery must fall before a calibration figure means anything.
@@ -570,7 +597,8 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Solarbot power</title>
 <style>
- :root{--bg:#fff5d1;--ink:#2b2320;--line:#c9b98a;--hi:#d2691e;--core:#3a7d6c;--wide:1100px}
+ :root{--bg:#fff5d1;--ink:#2b2320;--line:#c9b98a;--hi:#d2691e;--core:#3a7d6c;
+   --dim:#9a8a6a;--wide:1100px}
  *{box-sizing:border-box}
  body{margin:0;padding:0 16px 28px;font:14px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
  h1{font-size:22px;font-weight:600;margin:0 0 14px;text-align:center;letter-spacing:.02em}
@@ -583,12 +611,17 @@ PAGE = """<!doctype html>
  .strip .card{flex:1 1 120px;padding:8px 12px}
  .strip .big{font-size:21px}
  .tabs{display:flex;gap:3px;border-bottom:1px solid var(--line);margin:4px 0 0}
- .tabs button{background:none;border:1px solid transparent;border-bottom:none;color:inherit;
-   border-radius:9px 9px 0 0;padding:8px 18px;cursor:pointer;opacity:.6;margin-bottom:-1px}
- .tabs button:hover{opacity:.9}
- .tabs button.on{background:#fffdf5;border-color:var(--line);opacity:1;font-weight:600}
- /* Left: the two views. Right: the tools. */
+ .tabs button{background:none;border:1px solid transparent;border-bottom:none;
+   color:var(--dim);border-radius:9px 9px 0 0;padding:8px 18px;cursor:pointer;
+   margin-bottom:-1px}
+ .tabs button:hover{color:var(--ink)}
+ .tabs button.on{background:#fffdf5;border-color:var(--line);color:var(--ink);font-weight:600}
+ /* Left: what is happening now. Right: everything you look back at. */
  .tabs button.apart{margin-left:auto}
+ /* Pushed right where there is room. A phone takes this back in one place,
+    because an element that cannot shrink below its own words is exactly what
+    gets shoved off the edge of a narrow screen. */
+ .pushright{margin-left:auto}
  .panel{padding-top:20px}
  .panel[hidden]{display:none}
  /* Tooltips must never run off a narrow screen. */
@@ -601,12 +634,13 @@ PAGE = """<!doctype html>
    /* A sticky header eats half a phone screen, so let it scroll away. */
    header{position:static;box-shadow:none;padding-top:12px}
    h1{font-size:19px;margin-bottom:10px}
-   .strip{gap:8px}
-   .strip .card{flex:1 1 calc(50% - 4px);padding:7px 10px}
    .strip .big{font-size:18px}
-   .big .sub{font-size:12px;margin-left:6px}
-   /* Four tabs will not fit side by side, so they scroll. */
-   .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+   .big .sub{font-size:12px;margin-left:5px}
+   /* Five tabs will not fit side by side, so they scroll. The old
+      -webkit-overflow-scrolling has done nothing since iOS 13 except promote
+      its children to their own layers, which is half of why the selected tab
+      lost its letters. */
+   .tabs{overflow-x:auto}
    .tabs button{padding:8px 12px;font-size:13px;white-space:nowrap}
    .tabs button.apart{margin-left:12px}
    .panel{padding-top:16px}
@@ -681,9 +715,180 @@ PAGE = """<!doctype html>
  .i.l:hover::after,.i.l:focus::after{left:-4px;right:auto;transform:none}
  /* A roomier one, for the note that explains the whole measurement. */
  .i.wide:hover::after,.i.wide:focus::after{width:430px}
+
+ /* The bot's own face. These are the very drawings its little screen shows,
+    so the page wears the same expression as the thing on the desk. */
+ .mast{display:flex;align-items:center;justify-content:center;gap:14px;margin:0 0 14px}
+ .mast h1{margin:0;text-align:left}
+ .face{width:76px;height:76px;flex:0 0 auto;margin:0;cursor:pointer;
+       display:flex;align-items:center;justify-content:center}
+ .face img{width:100%;height:100%;object-fit:contain;display:block}
+ .doing{font-size:11px;text-transform:uppercase;letter-spacing:.07em;opacity:.6;margin-top:3px}
+ .doing.preview{opacity:.85;font-style:italic}
+ @media (max-width:700px){.face{width:56px;height:56px}}
+
+ /* ---------------------------------------------------------------------
+    "paper": the skin taken straight from solararchive.cmama.xyz. Her site
+    downloads no font at all, so prose falls back to the browser's serif and
+    the machine readable parts are Courier. Headings are not bold, corners
+    are never rounded (one border-radius in her whole stylesheet), and things
+    are separated by rules rather than boxed in. Switch it at the bottom
+    right; the choice is remembered. */
+ html.paper body{font-family:Georgia,"Times New Roman",serif;color:#000}
+ html.paper h1,html.paper h2{font-weight:normal}
+ html.paper h1{text-indent:-.15rem}
+ /* Courier for every number: her machine voice, and the digits keep the same
+    width so a reading no longer jitters while it changes */
+ html.paper .big,html.paper .lbl,html.paper .doing,html.paper .tag,
+ html.paper .rp .when,html.paper table,html.paper #pagecost{
+   font-family:"Courier New",Courier,monospace}
+ html.paper .big{font-weight:normal}
+ html.paper .lbl{letter-spacing:0}
+ html.paper .card,html.paper .btn,html.paper button,html.paper canvas,
+ html.paper textarea,html.paper select,html.paper .rp,html.paper .tag,
+ html.paper .tabs button{border-radius:0}
+ /* cards stop being little boxes and become ruled rows */
+ html.paper .card{background:none;border:0;border-top:2px solid #000;
+   padding:8px 12px 10px 0}
+ html.paper .rp{background:none;border:0;border-top:1px solid #000}
+ html.paper canvas{background:none;border:1px solid #000}
+ html.paper button,html.paper .btn{background:none;color:#000;border:1px solid #000}
+ html.paper button:hover,html.paper .btn:hover{background:#000;color:#fff5d1}
+ html.paper .tabs{border-bottom:1px solid #000}
+ html.paper .tabs button{color:#828282}
+ html.paper .tabs button.on{background:none;border-color:transparent;
+   border-bottom:2px solid #000;font-weight:normal;color:#000}
+ html.paper a{text-decoration:none;border-bottom:1px solid;padding-bottom:.05em}
+ html.paper a:hover{color:#828282}
+ html.paper textarea,html.paper select{background:none;border:1px solid #000}
+ html.paper .tag{background:none;border:1px solid #000}
+ /* The last box on the page. Every card and report row had already turned into
+    a rule with space under it, and this one white rounded panel was left over
+    from before, sitting in the middle of the page shouting. Her site has no
+    boxes at all, so it becomes a ruled section like the rest and the heading
+    joins the machine voice. */
+ html.paper details{background:none;border:0;border-top:1px solid #000;
+   border-radius:0;padding:12px 0 0;margin-top:30px}
+ /* The questions download sits right above this panel's rule but belongs to the
+    table further up, so the gap a panel usually gets would open in the wrong
+    place: between a line and the thing it is about. */
+ #cmpbox{margin-top:10px}
+ html.paper summary{font-family:"Courier New",Courier,monospace;
+   font-weight:normal;text-transform:uppercase;letter-spacing:.09em;font-size:12px}
+ html.paper summary::marker{color:#828282}
+ html.paper details[open] summary{margin-bottom:2px}
+ /* The answer itself was a second box inside the first one. */
+ html.paper .ans{background:none;border:0;border-left:2px solid #000;
+   border-radius:0;padding:2px 0 2px 14px;margin-top:14px;
+   font-family:Georgia,"Times New Roman",serif}
+ /* Her site states what the page weighed, down in the corner. This page is
+    about what things cost, so it says the same thing in the same place. */
+ #pagecost{display:none}
+ html.paper #pagecost{display:block;position:fixed;left:7px;bottom:5px;
+   font-size:11px;opacity:.75}
+ #skin{position:fixed;right:7px;bottom:5px;font-size:11px;cursor:pointer;
+   background:none;border:0;color:inherit;opacity:.55;padding:2px 4px;
+   font-family:"Courier New",Courier,monospace;border-radius:0}
+ #skin:hover{opacity:1}
+
+ /* ---------------------------------------------------------------------
+    Phone, last word.
+
+    These belong at the end and not with the other narrow-screen rules higher
+    up, because a media query adds no specificity: a plain rule further down
+    the sheet beats it. Both of the things below were written up there first
+    and quietly lost to the paper skin, which is declared after them. */
+ @media (max-width:700px){
+   /* Two across, without arithmetic. Sizing the cards at "half minus the gap"
+      needs the gap to be what you think it is, and it was not: twelve, not
+      eight, so two cards plus the gap came to four pixels more than the row
+      and they fell back to one each. A grid is told the columns and works the
+      gap out itself, so it cannot be wrong by four pixels. */
+   .strip{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+   .strip .card{min-width:0;padding:7px 10px}
+   .strip .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+   /* Five tabs wanted 356 pixels in a 333 pixel row, so the bar scrolled and
+      Calibration hung off the end. Trimming the padding buys back 40 and they
+      all fit. The overflow stays as a safety net for anything narrower again,
+      but without a scrollbar drawn across the tabs. */
+   /* Smaller again, to buy back the room the left/right split needs: without
+      spare width margin-left:auto has nothing to push with. */
+   .tabs button{padding:8px 6px;font-size:12px}
+   .tabs button.apart{margin-left:auto}
+   .tabs{scrollbar-width:none}
+   .tabs::-webkit-scrollbar{display:none}
+
+   /* The history row put the download link out to the right with margin-left
+      auto. That is a nice touch on a wide screen and the thing most likely to
+      be pushed off a narrow one, since the link cannot be made narrower than
+      its own words. On a phone it just follows the day picker. */
+   .pushright{margin-left:0}
+   .key,#daynote,#dayfile{overflow-wrap:anywhere}
+
+   /* The report is the thing you hand to someone, so on a phone it has to be
+      readable rather than draggable. Its two tables were 608 and 367 pixels
+      wide in a 336 pixel column and could not be squeezed: the headers are
+      nowrap, and "avg cost of a question" on one line sets the floor. Letting
+      the headers break and sharing the width evenly, both fit exactly.
+
+      The questions table on the static tab keeps its sideways scroll on
+      purpose. Ten columns in 336 pixels would be unreadable, and that one is
+      for looking things up rather than for handing over. */
+   #reportbody table{width:100%;table-layout:auto}
+   /* Wrapping at spaces only. Breaking anywhere also fits, but it turns
+      "questions" into "questi ons" and "battery" into "batter y", which is
+      worse than the scroll it replaced. The headers give up their letter
+      spacing and a point of size instead, which is what makes it fit. */
+   #reportbody th,#reportbody td{white-space:normal;overflow-wrap:normal;
+     padding:5px 4px}
+   #reportbody th{letter-spacing:0;font-size:10px}
+
+   /* A guard, not a fix: whatever else turns out to be a pixel too wide, it
+      may not drag the whole page sideways with it. clip rather than hidden,
+      because hidden would make the page a scroll container and take the boxes
+      that are supposed to scroll on their own down with it. hidden is left in
+      front of it for Safari before 16, which ignores clip entirely and would
+      otherwise be left with no guard at all. */
+   html,body{overflow-x:hidden;overflow-x:clip}
+
+   /* Fixed to the bottom corners is margin on a desktop and the last line of
+      the text on a phone. Down here they simply end the page. */
+   html.paper #pagecost,#skin{position:static;display:block;width:auto;
+     text-align:center;margin:26px auto 0;opacity:.6}
+ }
+ /* A dropdown keeps the operating system's own look unless you take it off,
+    which is why it stayed grey and rounded while everything around it changed. */
+ html.paper select{appearance:none;-webkit-appearance:none;background:none;
+   border:1px solid #000;border-radius:0;padding:7px 26px 7px 9px;
+   font-family:"Courier New",Courier,monospace;color:#000;
+   background-image:linear-gradient(45deg,transparent 50%,#000 50%),
+                    linear-gradient(135deg,#000 50%,transparent 50%);
+   background-position:right 13px center,right 8px center;
+   background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+ html.paper select:focus{outline:1px solid #000;outline-offset:1px}
+ /* The list that drops open is drawn separately from the button, so it stayed
+    the browser's own white until told otherwise. */
+ html.paper select option,html.paper select optgroup{background:#fff5d1;color:#000}
+ html.paper select option:checked{background:#000;color:#fff5d1}
+ html.paper .sw{border-radius:0}
+ /* The bands on the live graph only appear once the bot has actually done
+    something, so this states what the colours mean even when it is asleep. */
+ /* The same stacked bar the report uses, blown up to the width of the graph.
+    The bands on the graph only exist after the bot has answered something, so
+    this doubles as the key for them while it is asleep. */
+ .phasebar{margin-top:12px}
+ .phasebar .pbar{height:16px;width:100%;min-width:0;border-radius:4px}
+ html.paper .phasebar .pbar{border-radius:0;border:1px solid #000;background:none}
+ /* The line under it is a plain .key, exactly like the one at the foot of the
+    static table, so the same three colours are named the same way twice. */
 </style>
 <header>
-<h1>Solar bot</h1>
+<div class="mast">
+  <figure class="face" id="face" tabindex="0"
+    title="What the bot is doing right now, drawn the way its own screen draws it. Click to step through the states."><img id="faceimg" alt=""></figure>
+  <div><h1>Solar bot</h1><div class="doing" id="doing">idle</div></div>
+</div>
 <div class="row strip">
   <div class="card"><div class="lbl">now<i class="i d l" tabindex="0" data-tip="Total power the Pi's internal rails are drawing at this moment. Power is a rate, like speed: it says how fast energy is being used, not how much in total."></i></div><div class="big"><span id="now">-</span> W</div></div>
   <div class="card"><div class="lbl">idle<i class="i d" tabindex="0" data-tip="What the Pi draws doing nothing: the quietest tenth of the last two minutes. Everything labelled 'cost of question' is measured against this baseline."></i></div><div class="big"><span id="idle">-</span> W</div></div>
@@ -697,7 +902,8 @@ PAGE = """<!doctype html>
 <nav class="tabs">
   <button data-tab="live">Live</button>
   <button data-tab="static">Static</button>
-  <button data-tab="report" class="apart">Report</button>
+  <button data-tab="history" class="apart">History</button>
+  <button data-tab="report">Report</button>
   <button data-tab="calib">Calibration</button>
 </nav>
 </header>
@@ -719,7 +925,7 @@ Look on the back of the panel or on its packaging. If it lists volts and amps in
 Note that the rating is for full sun, straight on. In practice you get less, so the seconds shown are a best case and the real time is longer. Measuring the panel input with a sensor would give the true figure."></i>
     <input id="panel" type="number" min="0.1" step="0.5" value="5" style="width:70px;margin-left:6px"> W</div>
   <div class="key" id="unitnote" style="margin:0"></div>
-  <div style="margin-left:auto;flex:0 0 auto"><span class="lbl">what is measured</span><i class="i r d wide" tabindex="0" data-tip="Measured from the Raspberry Pi 5's own PMIC, which reports voltage and current for the board's internal rails. The Pi measures itself, no external sensor is involved.
+  <div class="pushright" style="flex:0 0 auto"><span class="lbl">what is measured</span><i class="i r d wide" tabindex="0" data-tip="Measured from the Raspberry Pi 5's own PMIC, which reports voltage and current for the board's internal rails. The Pi measures itself, no external sensor is involved.
 
 What you see is the processor, the memory and the wifi chip. That is where the thinking happens. The green line is VDD_CORE, the processor on its own.
 
@@ -730,13 +936,10 @@ So the real drain on the battery is higher than the joules shown here, by an amo
 To get the true battery cost, either put a sensor in the battery lead, or run a calibration on the Calibration tab."></i></div>
 </div>
 <canvas id="c" width="1200" height="440"></canvas>
+<div class="phasebar" id="phasebar"></div>
 <div class="key"><span class="sw" style="background:#d2691e"></span>total used
   <span class="sw" style="background:#3a7d6c;margin-left:12px"></span>cpu only (VDD_CORE)
-  <span class="sw" style="background:#c9a227;margin-left:12px"></span>coming in from the panel
-  <span style="margin-left:16px">bot phases:</span>
-  <span class="sw" style="background:rgba(74,160,90,.55)"></span>listening
-  <span class="sw" style="background:rgba(62,110,190,.55);margin-left:8px"></span>transcribing
-  <span class="sw" style="background:rgba(210,105,30,.6);margin-left:8px"></span>answering</div>
+  <span class="sw" style="background:#c9a227;margin-left:12px"></span>coming in from the panel</div>
 
 <details id="askbox">
 <summary>Ask a question from here</summary>
@@ -763,7 +966,36 @@ To get the true battery cost, either put a sensor in the battery lead, or run a 
 
 </section>
 
+<section id="tab-history" class="panel" hidden>
+<div class="row" style="align-items:center;gap:10px;margin-bottom:10px">
+  <label>Day <select id="day"></select></label>
+  <span class="key" id="daynote"></span>
+  <span class="key pushright" id="dayfile"></span>
+</div>
+<canvas id="hc" width="1200" height="380"></canvas>
+<div class="key">A whole day at once, so you can compare one day with another. Each
+ minute of the log becomes one point, and the three lines are:
+ <b>peak</b>, the busiest single second in that minute, faint and behind the rest;
+ <b>total</b>, the average of everything the Pi drew that minute;
+ <b>cpu</b>, the part of that average spent on the processor alone, in blue.
+ The gap between total and cpu is everything that is not the processor: the
+ screen, the microphone, the board itself.
+ Gaps in the lines are left empty on purpose \u2014 that is the bot switched off,
+ and a day with holes in it is worth being able to see.</div>
+<div class="row" style="margin-top:12px">
+  <div class="card"><div class="lbl">logged</div><div class="big"><span id="hcov">-</span></div></div>
+  <div class="card"><div class="lbl">energy that day</div><div class="big"><span id="hwh">-</span> Wh</div></div>
+  <div class="card"><div class="lbl">average</div><div class="big"><span id="hmean">-</span> W</div></div>
+  <div class="card"><div class="lbl">peak</div><div class="big"><span id="hpeak">-</span> W</div></div>
+  <div class="card"><div class="lbl">battery</div><div class="big"><span id="hbat">-</span></div></div>
+</div>
+</section>
+
 <section id="tab-static" class="panel" hidden>
+<div class="row" style="align-items:center;gap:10px;margin-bottom:14px">
+  <label>Day <select id="qday"></select></label>
+  <span class="key" id="qdaynote"></span>
+</div>
 <h2>Cost against duration</h2>
 <div class="key">One dot per question: how long it took against what it cost. The numbers match the list
   below. Hover a dot to see the question.</div>
@@ -773,7 +1005,16 @@ To get the true battery cost, either put a sensor in the battery lead, or run a 
 <div class="key">Every time you hold the button on the bot, the whole cycle is logged here with the model
   that was loaded when it answered. Saved to disk, so restarts do not lose it.</div>
 <div id="qlog"></div>
-<div class="key" id="files"></div>
+<div class="key" id="qfiles"></div>
+
+<details id="cmpbox">
+<summary>What if you had asked a cloud model?</summary>
+<div class="key" id="comparenote"></div>
+<div class="row" style="align-items:center;gap:10px;margin:10px 0 4px">
+  <label>Compare with <select id="cmodel"></select></label>
+</div>
+<div id="compare"></div>
+</details>
 </section>
 
 <section id="tab-calib" class="panel" hidden>
@@ -795,10 +1036,14 @@ To get the true battery cost, either put a sensor in the battery lead, or run a 
 <section id="tab-report" class="panel" hidden>
 <div class="row" style="align-items:center;margin-bottom:6px">
   <h2 style="margin:0">Report</h2>
-  <div style="margin-left:auto"><a id="dl" class="btn" download="solarbot-energy-report.html">Download</a></div>
+  <label style="margin-left:18px">Day <select id="rday"></select></label>
+  <div class="pushright"><a id="dl" class="btn" download="solarbot-energy-report.html">Download</a></div>
 </div>
 <div id="reportbody"></div>
 </section>
+
+<div id="pagecost"></div>
+<button id="skin" title="Switch between the original look and the one taken from the Sun Shines Bright site"></button>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -826,19 +1071,76 @@ function unitNote(){
     v==='pct'?'Share of one full charge of the '+BAT.mah+' mAh pack ('+Math.round(BAT.j)+' J).':
               'How long the panel would need to make it, at its rated output.';
 }
-const PH={
-  listening     :{n:'listening',    c:'rgba(74,160,90,.20)', t:'#2f6b3c'},
-  wake_listening:{n:'listening',    c:'rgba(74,160,90,.20)', t:'#2f6b3c'},
-  detecting     :{n:'detecting',    c:'rgba(74,160,90,.10)', t:'#2f6b3c'},
-  asr           :{n:'transcribing', c:'rgba(62,110,190,.20)',t:'#2b4c86'},
-  answer        :{n:'answering',    c:'rgba(210,105,30,.24)',t:'#9c4c14'},
-  image         :{n:'image',        c:'rgba(150,90,180,.18)',t:'#6b3f80'},
-  sleep         :{n:'',             c:null,                  t:''}
+/* f: which of the five drawings belongs to this flow. The log calls the flows
+   by their own names, while the drawings are named after what the bot puts on
+   its screen, so the two vocabularies have to be tied together here. */
+/* Every phase colour in one place, so the bands on the graph, the bar under it
+   and the bars in the report can never drift apart again. Lighter than the old
+   set: at full strength those read as heavy blocks on cream rather than as a
+   key you can glance at. The paper column keeps the hues of her site but tinted
+   towards the background instead of sitting at full saturation. */
+const PHASE={
+  listening   :{c:'#7ecb92', p:'#5fbda6'},
+  detecting   :{c:'#b6e4c2', p:'#a6d8cb'},
+  transcribing:{c:'#84acea', p:'#8b95de'},
+  answering   :{c:'#f2ad72', p:'#f0897d'},
+  image       :{c:'#cba6e0', p:'#c2c2c2'}
 };
+const PHC=n=>((PHASE[n]||{})[isPaper()?'p':'c'])||'#cccccc';
+/* The same colour again, see-through, for the band painted behind the curve. */
+const PHBAND=(n,a)=>{
+  const h=PHC(n);
+  return 'rgba('+parseInt(h.slice(1,3),16)+','+parseInt(h.slice(3,5),16)+','+
+         parseInt(h.slice(5,7),16)+','+a+')';
+};
+const PH={
+  listening     :{n:'listening',    c:'rgba(74,160,90,.20)', t:'#2f6b3c', f:'listening',
+                  pc:'rgba(0,105,81,.16)',   pt:'#006951'},
+  wake_listening:{n:'listening',    c:'rgba(74,160,90,.20)', t:'#2f6b3c', f:'detecting',
+                  pc:'rgba(0,105,81,.16)',   pt:'#006951'},
+  detecting     :{n:'detecting',    c:'rgba(74,160,90,.10)', t:'#2f6b3c', f:'detecting',
+                  pc:'rgba(0,105,81,.09)',   pt:'#006951'},
+  asr           :{n:'transcribing', c:'rgba(62,110,190,.20)',t:'#2b4c86', f:'recognizing',
+                  pc:'rgba(22,45,171,.16)',  pt:'#162dab'},
+  answer        :{n:'answering',    c:'rgba(210,105,30,.24)',t:'#9c4c14', f:'answering',
+                  pc:'rgba(209,19,5,.16)',   pt:'#d11305'},
+  image         :{n:'image',        c:'rgba(150,90,180,.18)',t:'#6b3f80', f:'answering',
+                  pc:'rgba(130,130,130,.16)',pt:'#828282'},
+  sleep         :{n:'',             c:null,                  t:'',        f:'idle',
+                  pc:null,                   pt:''}
+};
+
+/* ---- the face ---------------------------------------------------------
+   Five states, three frames each. The frames ping-pong (0,1,2,1) so the
+   movement breathes instead of snapping back to the start. Clicking steps
+   through the states by hand, which is the only way to see them while the
+   chatbot itself is not running. */
+const FACES=['idle','listening','detecting','recognizing','answering'];
+const FSEQ=[0,1,2,1];
+let faceState='idle', faceStep=0, facePreview=null;
+FACES.forEach(s=>[0,1,2].forEach(i=>{const im=new Image();im.src='faces/'+s+'/'+i+'.png';}));
+function paintFace(){
+  const s=facePreview||faceState;
+  $('faceimg').src='faces/'+s+'/'+FSEQ[faceStep%FSEQ.length]+'.png';
+  $('doing').textContent=s+(facePreview?' · preview':'');
+  $('doing').classList.toggle('preview',!!facePreview);
+}
+function stepFace(){
+  const i=FACES.indexOf(facePreview||faceState);
+  facePreview=FACES[(i+1)%FACES.length];
+  if(facePreview===faceState) facePreview=null;
+  faceStep=0; paintFace();
+}
+function setFace(flow){
+  const s=(PH[flow]&&PH[flow].f)||'idle';
+  if(s===faceState) return;
+  faceState=s; faceStep=0; facePreview=null; paintFace();
+}
 async function poll(){
   try{
     const r=await fetch('api/samples');const j=await r.json();
     data=j.samples;phases=j.states||[];
+    setFace(phases.length?phases[phases.length-1][1]:'sleep');
     const last=data[data.length-1];
     if(last){$('now').textContent=last[1].toFixed(2);$('core').textContent=last[2].toFixed(2);}
     $('idle').textContent=j.idle.toFixed(2);
@@ -896,13 +1198,18 @@ function draw(){
   const peak=Math.max(10,data.reduce((a,s)=>Math.max(a,s[1],s[3]||0),0)*1.15);
   const B=30;   // room along the bottom for clock labels
   const px=t=>(t-t0)/span*W, py=w=>H-B-(w/peak)*(H-B);
+  const paper=document.documentElement.classList.contains('paper');
   for(let i=0;i<phases.length;i++){
-    const p=PH[phases[i][1]];if(!p||!p.c)continue;
+    const p=PH[phases[i][1]];if(!p||!p.n)continue;
     const a=Math.max(0,px(phases[i][0]));
     const b=i+1<phases.length?px(phases[i+1][0]):W;
     if(b<=a)continue;
-    x.fillStyle=p.c;x.fillRect(a,0,b-a,H);
-    if(b-a>62&&p.n){x.fillStyle=p.t;x.font='600 12px system-ui';x.fillText(p.n,a+6,17);}
+    /* detecting is the quiet sibling of listening and shares its colour, so it
+       is painted fainter to stay apart from it. */
+    x.fillStyle=PHBAND(p.n,p.n==='detecting'?0.17:0.32);x.fillRect(a,0,b-a,H);
+    if(b-a>62&&p.n){x.fillStyle=paper?p.pt:p.t;
+      x.font=paper?'12px "Courier New",Courier,monospace':'600 12px system-ui';
+      x.fillText(p.n,a+6,17);}
   }
   x.strokeStyle='#e0d5b0';x.lineWidth=1;x.font='11px system-ui';x.fillStyle='#9a8a6a';
   const step=peak>24?4:2;
@@ -993,13 +1300,54 @@ function fmtT(x){
   return Math.floor(x/3600)+' h '+String(Math.floor(x%3600/60)).padStart(2,'0')+' m';
 }
 let lastQ=[];
+/* Which day the static tab is showing. Everything on that tab reads through
+   shownQ(), so the plot, the table and the cloud comparison can never end up
+   showing different sets of questions. */
+const dayKey=t=>{
+  const d=new Date(t*1000);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+
+         '-'+String(d.getDate()).padStart(2,'0');
+};
+function shownQ(){
+  const d=$('qday')?$('qday').value:'';
+  return (!d||d==='all')?lastQ:lastQ.filter(q=>dayKey(q.t)===d);
+}
+function paintQDays(){
+  const sel=$('qday'); if(!sel) return;
+  const had=sel.value;
+  const days=[...new Set(lastQ.map(q=>dayKey(q.t)))].sort().reverse();
+  sel.innerHTML='<option value="all">all days</option>'+
+    days.map(d=>'<option>'+d+'</option>').join('');
+  /* Default to the newest day rather than everything: with months of questions
+     "all" is a wall, and the day you just tested is what you came to look at. */
+  sel.value=(had&&[...sel.options].some(o=>o.value===had))?had:(days[0]||'all');
+  const n=shownQ().length;
+  $('qdaynote').textContent=n+' question'+(n===1?'':'s')+
+    (sel.value==='all'?' in total':' that day')+
+    (days.length>1?' \u00b7 '+days.length+' days logged':'');
+}
 
 // Colours are assigned in the order models first appear, so a run with one
 // model stays plain and a comparison run separates itself.
 const PALETTE=['#d2691e','#3e6ebe','#4aa05a','#9c4bb0','#c2255c','#0f8a8a','#8a6d1f'];
+/* Her site works in blue, red and green on cream, so the dots borrow those
+   first and only reach for anything else when there are more models than that. */
+const PALETTE_PAPER=['#162dab','#d11305','#006951','#000','#828282','#7a2f8f','#b06a00'];
+const isPaper=()=>document.documentElement.classList.contains('paper');
+/* Every colour the drawn charts use, in one place, so both skins stay honest. */
+function SKIN(){
+  return isPaper()
+    ? {bg:'none', edge:'#000', grid:'rgba(0,0,0,.13)', axis:'#000',
+       label:'#000', dim:'#000', radius:'0',
+       font:'"Courier New",Courier,monospace'}
+    : {bg:'#fffdf5', edge:'#c9b98a', grid:'#e6dcc0', axis:'#c9b98a',
+       label:'#6b5b3a', dim:'#9a8a6a', radius:'10px',
+       font:'system-ui,sans-serif'};
+}
 function modelColours(rows){
   const m={},out={};let i=0;
-  rows.forEach(q=>{const k=q.model||'?';if(!(k in m)){m[k]=PALETTE[i%PALETTE.length];i++;}});
+  const pal=isPaper()?PALETTE_PAPER:PALETTE;
+  rows.forEach(q=>{const k=q.model||'?';if(!(k in m)){m[k]=pal[i%pal.length];i++;}});
   Object.keys(m).forEach(k=>out[k]=m[k]);
   return out;
 }
@@ -1011,6 +1359,9 @@ function niceMax(v){
   return 10*p;
 }
 function renderScatter(){
+  /* The selected day only. Shadowing the global keeps one code path instead of
+     threading a parameter through everything below. */
+  const lastQ=shownQ();
   const box=$('scatter');
   if(!lastQ.length){box.innerHTML='<div class="key">Nothing to plot yet.</div>';return;}
   // Oldest first, so the numbers follow the order you asked them.
@@ -1020,49 +1371,54 @@ function renderScatter(){
   const W=1100,H=340,L=64,R=20,T=18,B=48;
   const xm=niceMax(Math.max(...pts.map(p=>p.x))),ym=niceMax(Math.max(...pts.map(p=>p.y)));
   const px=v=>L+(v/xm)*(W-L-R), py=v=>H-B-(v/ym)*(H-T-B);
+  const S=SKIN();
   let g='';
   for(let i=0;i<=5;i++){
     const xv=xm*i/5,yv=ym*i/5;
-    g+='<line x1="'+px(xv)+'" y1="'+T+'" x2="'+px(xv)+'" y2="'+(H-B)+'" stroke="#e6dcc0"/>'+
-       '<text x="'+px(xv)+'" y="'+(H-B+18)+'" text-anchor="middle" font-size="11" fill="#9a8a6a">'+
+    g+='<line x1="'+px(xv)+'" y1="'+T+'" x2="'+px(xv)+'" y2="'+(H-B)+'" stroke="'+S.grid+'"/>'+
+       '<text x="'+px(xv)+'" y="'+(H-B+18)+'" text-anchor="middle" font-size="11" '+
+       'font-family="'+S.font+'" fill="'+S.dim+'">'+
        (+xv.toFixed(xm<10?2:0))+'</text>'+
-       '<line x1="'+L+'" y1="'+py(yv)+'" x2="'+(W-R)+'" y2="'+py(yv)+'" stroke="#e6dcc0"/>'+
-       '<text x="'+(L-8)+'" y="'+(py(yv)+4)+'" text-anchor="end" font-size="11" fill="#9a8a6a">'+
+       '<line x1="'+L+'" y1="'+py(yv)+'" x2="'+(W-R)+'" y2="'+py(yv)+'" stroke="'+S.grid+'"/>'+
+       '<text x="'+(L-8)+'" y="'+(py(yv)+4)+'" text-anchor="end" font-size="11" '+
+       'font-family="'+S.font+'" fill="'+S.dim+'">'+
        (+yv.toFixed(ym<10?1:0))+'</text>';
   }
   const dots=pts.map(p=>{
     const c=cols[p.q.model||'?'];
     return '<g class="dot" data-n="'+p.n+'">'+
       '<circle cx="'+px(p.x)+'" cy="'+py(p.y)+'" r="7" fill="'+c+'" fill-opacity=".75" stroke="'+c+'"/>'+
-      '<text x="'+px(p.x)+'" y="'+(py(p.y)-12)+'" text-anchor="middle" font-size="10" fill="#6b5b3a">'+p.n+'</text>'+
+      '<text x="'+px(p.x)+'" y="'+(py(p.y)-12)+'" text-anchor="middle" font-size="10" '+
+      'font-family="'+S.font+'" fill="'+S.label+'">'+p.n+'</text>'+
       '<title>'+esc('#'+p.n+'  '+(p.q.text||'(not transcribed)')+'\\n'+(p.q.model||'?')+
         '\\n'+fmtE(p.q.above_idle)+'  ·  '+p.y.toFixed(1)+' s')+'</title></g>';
   }).join('');
   const legend=Object.keys(cols).map(k=>
     '<span class="sw" style="background:'+cols[k]+'"></span>'+esc(k)).join(' &nbsp; ');
   box.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block;'+
-    'background:#fffdf5;border:1px solid #c9b98a;border-radius:10px">'+g+
-    '<line x1="'+L+'" y1="'+T+'" x2="'+L+'" y2="'+(H-B)+'" stroke="#c9b98a"/>'+
-    '<line x1="'+L+'" y1="'+(H-B)+'" x2="'+(W-R)+'" y2="'+(H-B)+'" stroke="#c9b98a"/>'+
-    '<text x="'+((L+W-R)/2)+'" y="'+(H-6)+'" text-anchor="middle" font-size="12" fill="#6b5b3a">'+
+    'background:'+S.bg+';border:1px solid '+S.edge+';border-radius:'+S.radius+'">'+g+
+    '<line x1="'+L+'" y1="'+T+'" x2="'+L+'" y2="'+(H-B)+'" stroke="'+S.axis+'"/>'+
+    '<line x1="'+L+'" y1="'+(H-B)+'" x2="'+(W-R)+'" y2="'+(H-B)+'" stroke="'+S.axis+'"/>'+
+    '<text x="'+((L+W-R)/2)+'" y="'+(H-6)+'" text-anchor="middle" font-size="12" '+
+    'font-family="'+S.font+'" fill="'+S.label+'">'+
     'cost of question ('+U().lbl+')</text>'+
     '<text transform="translate(16,'+((T+H-B)/2)+') rotate(-90)" text-anchor="middle" '+
     'font-size="12" fill="#6b5b3a">duration (seconds)</text>'+
     dots+'</svg><div class="key">'+legend+'</div>';
 }
 function renderQ(){
+  const lastQ=shownQ();          // the selected day only, as in renderScatter
   if(!lastQ.length){
     $('qlog').innerHTML='<div class="key">Nothing yet. Hold the button on the bot and ask something.</div>';
     return;
   }
   // The three phases as one stacked bar, in the same colours as the live graph.
-  const PH_COL={listening:'#4aa05a',transcribing:'#3e6ebe',answering:'#d2691e'};
   const phBar=q=>{
     const p=q.phases,names=['listening','transcribing','answering'];
     const tot=Math.max(0.001,names.reduce((s,n)=>s+(p[n]||{}).seconds,0));
     const tt=names.map(n=>n+' '+(p[n]||{}).seconds.toFixed(1)+' s, '+fmtE((p[n]||{}).joules)).join('\\n');
     return '<div class="pbar" title="'+esc(tt)+'">'+names.map(n=>
-      '<span style="width:'+((p[n]||{}).seconds/tot*100).toFixed(1)+'%;background:'+PH_COL[n]+'"></span>'
+      '<span style="width:'+((p[n]||{}).seconds/tot*100).toFixed(1)+'%;background:'+PHC(n)+'"></span>'
     ).join('')+'</div>';
   };
   // Same numbering as the scatter plot: oldest question is 1.
@@ -1104,45 +1460,86 @@ function renderQ(){
     '</tr>').join('')+'</table>'+
     // Same key as under the live graph, so the bars read the same way.
     '<div class="key" style="margin-top:8px">phases:'+
-    '<span class="sw" style="background:'+PH_COL.listening+';margin-left:10px"></span>listening'+
-    '<span class="sw" style="background:'+PH_COL.transcribing+';margin-left:12px"></span>transcribing'+
-    '<span class="sw" style="background:'+PH_COL.answering+';margin-left:12px"></span>answering'+
+    '<span class="sw" style="background:'+PHC('listening')+';margin-left:10px"></span>listening'+
+    '<span class="sw" style="background:'+PHC('transcribing')+';margin-left:12px"></span>transcribing'+
+    '<span class="sw" style="background:'+PHC('answering')+';margin-left:12px"></span>answering'+
     '</div>';
 }
 async function qlog(){
   try{
     const r=await fetch('api/questions');const j=await r.json();
-    lastQ=j.questions;renderQ();renderScatter();
+    lastQ=j.questions;paintQDays();renderQ();renderScatter();paintPhaseBar();
     if(!$('tab-report').hidden) loadReport();
   }catch(e){}
 }
 const qs=()=>'unit='+encodeURIComponent($('unit').value)+
-             '&panel='+encodeURIComponent($('panel').value||'5');
+             '&panel='+encodeURIComponent($('panel').value||'5')+
+             '&day='+encodeURIComponent(reportDay());
+/* An empty day means every day, which keeps the old behaviour as the "all"
+   option rather than as a special case threaded through everything. */
+const reportDay=()=>{
+  const v=$('rday')?$('rday').value:'';
+  return (!v||v==='all')?'':v;
+};
+/* The raw files, kept as a lookup rather than printed as a list.
+   A list of every file ever written is a dump, not an offer: it sat on the
+   questions tab naming days you were not looking at. The same links are more
+   use attached to the thing they belong to, so the day you have open on the
+   history tab offers its own csv, and the questions table offers the questions. */
+let fileMap={}, fileDir='';
 async function files(){
   try{
-    const r=await fetch('api/files');const j=await r.json();
-    let h='';
-    if(j.files.length){
-      h='<b>Raw data:</b> '+j.files.map(f=>'<a href="download/'+encodeURIComponent(f.name)+
-         '">'+esc(f.name)+'</a> ('+f.kb+' kB)').join(' &middot; ')+
-         '<br><span style="opacity:.8">questions.jsonl is the same questions with every field kept; '+
-         'power-DATE.csv is one row per second of total and cpu watts.</span><br>';
-    }
-    h+='<span style="opacity:.8">Stored on the Pi in '+esc(j.dir)+'</span>';
-    $('files').innerHTML=h;
+    const j=await (await fetch('api/files')).json();
+    fileMap={}; (j.files||[]).forEach(f=>{ fileMap[f.name]=f.kb; });
+    fileDir=j.dir||'';
   }catch(e){}
+  paintQFiles(); paintDayFile();
+}
+function paintQFiles(){
+  const el=$('qfiles'); if(!el) return;
+  const kb=fileMap['questions.jsonl'];
+  el.innerHTML='Download these questions as '+
+    '<a href="download/questions.csv" download>csv</a> for a spreadsheet, or as '+
+    '<a href="download/questions.jsonl" download>jsonl</a> with every field kept'+
+    (kb?' ('+kb+' kB)':'')+'.';
+}
+function paintDayFile(){
+  const el=$('dayfile'); if(!el) return;
+  const d=$('day')?$('day').value:'';
+  const name='power-'+d+'.csv', kb=fileMap[name];
+  if(!d||!kb){ el.textContent=''; return; }
+  el.innerHTML='<a href="download/'+encodeURIComponent(name)+'" download>download this day</a> '+
+    '<span style="opacity:.7">('+kb+' kB, one row per second)</span>';
 }
 // The Report tab shows the finished document inline, so you can read it before
 // deciding to hand it over.
 // The report, rendered straight into the page so it scrolls with everything
 // else. The downloadable file is built separately on the server, from the same
 // numbers, so the two stay in step.
+function paintRDays(){
+  const sel=$('rday'); if(!sel) return;
+  const had=sel.value;
+  const days=[...new Set(lastQ.map(q=>dayKey(q.t)))].sort().reverse();
+  sel.innerHTML='<option value="all">all days</option>'+
+    days.map(d=>'<option>'+d+'</option>').join('');
+  /* The whole set is the honest default here: a report is the thing you hand
+     over, and handing over one day without saying so would be a smaller claim
+     than it looks. Pick a day deliberately if you want one. */
+  sel.value=(had&&[...sel.options].some(o=>o.value===had))?had:'all';
+}
 function loadReport(){
+  paintRDays();
+  const day=reportDay();
   $('dl').href='download/report.html?'+qs();
+  $('dl').setAttribute('download',
+    'solarbot-energy-report'+(day?'-'+day:'')+'.html');
   const box=$('reportbody');
-  if(!lastQ.length){box.innerHTML='<div class="key">No questions recorded yet. '+
-    'Hold the button on the bot and ask something.</div>';return;}
-  const rows=lastQ.slice().sort((a,b)=>b.t-a.t);
+  const shown=day?lastQ.filter(q=>dayKey(q.t)===day):lastQ;
+  if(!shown.length){box.innerHTML='<div class="key">'+(day
+    ?'Nothing was logged on '+day+'.'
+    :'No questions recorded yet. Hold the button on the bot and ask something.')+
+    '</div>';return;}
+  const rows=shown.slice().sort((a,b)=>b.t-a.t);
   const group=(key)=>{
     const by={};rows.forEach(q=>{const k=q[key]||'unknown';(by[k]=by[k]||[]).push(q);});
     return by;
@@ -1165,10 +1562,9 @@ function loadReport(){
            '<td class="n"><b>'+fmtE(j/a.length)+'</b></td></tr>';
   }).join('');
 
-  const PH_COL={listening:'#4aa05a',transcribing:'#3e6ebe',answering:'#d2691e'};
   const cards=rows.map(q=>{
     const bars=['listening','transcribing','answering'].map(n=>
-      '<span><span class="sw" style="background:'+PH_COL[n]+'"></span>'+n+': '+
+      '<span><span class="sw" style="background:'+PHC(n)+'"></span>'+n+': '+
       (q.phases[n]||{}).seconds.toFixed(1)+' s, '+fmtE((q.phases[n]||{}).joules)+'</span>').join('');
     return '<div class="rp"><div><span class="when">'+esc(q.iso||'')+'</span>'+
       '<span class="tag">'+esc(q.model||'?')+'</span><span class="tag">'+esc(q.source||'?')+'</span>'+
@@ -1207,7 +1603,176 @@ function showTab(name){
   document.querySelectorAll('.panel').forEach(p=>p.hidden=(p.id!=='tab-'+name));
   try{localStorage.setItem('solarbot-tab',name);}catch(e){}
   if(name==='report') loadReport();
+  if(name==='static' && $('cmpbox').open) loadCompare();
+  if(name==='history'){ loadDays(); }
 }
+/* ---- history ----------------------------------------------------------
+   The live graph only ever holds the last few minutes. Everything older is
+   on disk and was, until now, only downloadable. This draws a whole day. */
+let hist=null;
+async function loadDays(){
+  try{
+    const j=await (await fetch('api/days')).json();
+    const sel=$('day'), had=sel.value;
+    sel.innerHTML=(j.days||[]).map(d=>'<option>'+d+'</option>').join('');
+    if(had&&(j.days||[]).includes(had)) sel.value=had;
+    if(sel.value) loadDay();
+  }catch(e){}
+}
+async function loadDay(){
+  const d=$('day').value; if(!d) return;
+  try{
+    hist=await (await fetch('api/history?day='+encodeURIComponent(d))).json();
+  }catch(e){ hist=null; }
+  paintDayFile();
+  showDay();
+}
+function showDay(){
+  const h=hist;
+  if(!h||h.error||!h.points||!h.points.length){
+    $('daynote').textContent=h&&h.error?h.error:'nothing logged that day';
+    $('hcov').textContent=$('hwh').textContent=$('hmean').textContent=
+      $('hpeak').textContent=$('hbat').textContent='-';
+    drawHist(); return;
+  }
+  const hrs=h.seconds/3600;
+  $('hcov').textContent=hrs>=1?hrs.toFixed(1)+' h':Math.round(h.seconds/60)+' min';
+  $('hwh').textContent=h.wh.toFixed(2);
+  $('hmean').textContent=h.mean.toFixed(2);
+  $('hpeak').textContent=h.peak.toFixed(2);
+  const b=h.battery||{};
+  $('hbat').textContent=(b.first==null||b.last==null)?'-'
+    :(b.first.toFixed(0)+'% \u2192 '+b.last.toFixed(0)+'%');
+  $('daynote').textContent=(h.seconds/864).toFixed(0)+'% of the day covered';
+  drawHist();
+}
+function drawHist(){
+  const c=$('hc'); if(!c) return;
+  const x=c.getContext('2d'), W=c.width, H=c.height, L=54, R=14, T=12, B=30;
+  const S=SKIN();
+  x.clearRect(0,0,W,H);
+  if(S.bg!=='none'){x.fillStyle=S.bg;x.fillRect(0,0,W,H);}
+  const h=hist;
+  if(!h||!h.points||!h.points.length){
+    x.fillStyle=S.dim;x.font='13px '+S.font;
+    x.fillText('nothing logged that day',L,H/2); return;
+  }
+  /* Always the whole day, so two days can be compared by eye and a short
+     stretch of logging looks as short as it was. */
+  const t0=h.points[0][0]-(h.points[0][0]%86400)+(new Date(h.day+'T00:00:00')).getTimezoneOffset()*60;
+  const day0=Math.min(h.points[0][0], t0), day1=day0+86400;
+  const peak=Math.max(1,Math.max.apply(null,h.points.map(p=>p[3])))*1.1;
+  const px=t=>L+(t-day0)/86400*(W-L-R), py=w=>H-B-(w/peak)*(H-T-B);
+  x.strokeStyle=S.grid;x.lineWidth=1;x.fillStyle=S.dim;x.font='11px '+S.font;
+  for(let hh=0;hh<=24;hh+=3){
+    const xx=px(day0+hh*3600);
+    x.beginPath();x.moveTo(xx,T);x.lineTo(xx,H-B);x.stroke();
+    x.textAlign='center';x.fillText((hh<10?'0':'')+hh+':00',xx,H-B+16);
+  }
+  x.textAlign='right';
+  for(let i=0;i<=4;i++){
+    const w=peak*i/4,yy=py(w);
+    x.beginPath();x.moveTo(L,yy);x.lineTo(W-R,yy);x.stroke();
+    x.fillText(w.toFixed(1),L-6,yy+4);
+  }
+  /* The per-minute peak sits behind the mean, so a burst that lasted seconds
+     is still visible instead of being averaged into nothing. */
+  const gap=(a,b)=>b-a>120;   // more than two minutes apart is a gap
+  const line=(idx,style,width)=>{
+    x.strokeStyle=style;x.lineWidth=width;x.beginPath();
+    let pen=false;
+    for(let i=0;i<h.points.length;i++){
+      const p=h.points[i];
+      if(pen&&gap(h.points[i-1][0],p[0])){x.stroke();x.beginPath();pen=false;}
+      const X=px(p[0]),Y=py(p[idx]);
+      if(pen) x.lineTo(X,Y); else {x.moveTo(X,Y);pen=true;}
+    }
+    x.stroke();
+  };
+  const paper=isPaper();
+  const cPeak=paper?'rgba(0,0,0,.30)':'rgba(210,105,30,.40)';
+  const cTot =paper?'#000':'#6b5b3a';
+  const cCpu =paper?'#162dab':'#3e6ebe';
+  line(3, cPeak, 1);              // the highest single second in each minute
+  line(1, cTot , 1.6);            // the average of that minute, everything
+  line(2, cCpu , 1.2);            // the average of that minute, cpu only
+  x.strokeStyle=S.axis;x.lineWidth=1;
+  x.beginPath();x.moveTo(L,T);x.lineTo(L,H-B);x.lineTo(W-R,H-B);x.stroke();
+  /* Three lines is two more than anyone guesses, so they name themselves. */
+  x.textAlign='left';x.font='11px '+S.font;
+  x.fillStyle=cPeak;x.fillText('peak W',L+6,T+12);
+  x.fillStyle=cTot ;x.fillText('total W',L+62,T+12);
+  x.fillStyle=cCpu ;x.fillText('cpu W',L+122,T+12);
+}
+$('day').onchange=loadDay;
+
+/* ---- the cloud comparison ---------------------------------------------
+   The page measures what a question cost on this Pi. ecocost estimates what
+   the same question would have cost in a data centre. Putting the two next to
+   each other is the only honest use of it: it cannot measure, and it has never
+   heard of the model running here. */
+let cmp=null;
+async function loadCompare(){
+  try{
+    const m=$('cmodel').value;
+    cmp=await (await fetch('api/compare'+(m?'?model='+encodeURIComponent(m):''))).json();
+  }catch(e){ cmp=null; }
+  renderCompare();
+}
+function renderCompare(){
+  const box=$('compare'), note=$('comparenote');
+  if(!cmp||!cmp.available){
+    note.textContent='Not available: the ecocost package is not installed on the Pi.';
+    box.innerHTML=''; $('cmodel').innerHTML=''; return;
+  }
+  const sel=$('cmodel');
+  if(!sel.options.length){
+    sel.innerHTML=(cmp.models||[]).map(m=>'<option'+(m===cmp.model?' selected':'')+'>'+m+'</option>').join('');
+  }
+  note.innerHTML='Your questions priced as if a data centre had answered them, by '+
+    '<a href="https://gooey.ai/ecocost" target="_blank" rel="noopener">ecocost</a>. '+
+    'It works from token counts alone, so the answer length is derived from how long '+
+    'the answering phase took at <b>'+cmp.tokens_per_second+' tokens a second</b>, measured '+
+    'on this Pi for '+esc(cmp.bot_model||'the local model')+'. '+
+    'The range is the estimate\u2019s own: ecocost does not know which chip, which data '+
+    'centre or which grid answered, and says so.';
+  const dag=$('qday')?$('qday').value:'all';
+  const rows=(cmp.questions||[]).filter(r=>dag==='all'||dayKey(r.t)===dag);
+  if(!rows.length){ box.innerHTML='<div class="key">Nothing to compare on that day.</div>'; return; }
+  const here=rows.reduce((s,r)=>s+(r.measured||0),0);
+  const there=rows.reduce((s,r)=>s+(r.joules||0),0);
+  const lo=rows.reduce((s,r)=>s+(r.min||0),0), hi=rows.reduce((s,r)=>s+(r.max||0),0);
+  const ratio=here>0?there/here:0;
+  box.innerHTML=
+    '<div class="key" style="font-size:14px;margin:12px 0 2px">'+
+    'These <b>'+rows.length+'</b> questions cost <b>'+fmtE(here)+'</b> here. On <b>'+
+    esc(cmp.model)+'</b> the same questions come out at <b>'+fmtE(there)+'</b>'+
+    (ratio?', about <b>'+ratio.toFixed(0)+' times as much</b>':'')+
+    ' \u2014 somewhere between '+fmtE(lo)+' and '+fmtE(hi)+'.</div>'+
+    '<table style="margin-top:14px"><tr><th>time</th><th>question</th>'+
+    '<th class="n">here</th><th class="n">'+esc(cmp.model)+'</th>'+
+    '<th class="n">range</th><th class="n">times more</th>'+
+    '<th class="n">CO\u2082</th><th class="n">water</th></tr>'+
+    rows.slice().sort((a,b)=>b.t-a.t).map(r=>{
+      const x=r.measured>0?(r.joules/r.measured):0;
+      return '<tr>'+
+      '<td>'+clock(r.t)+'</td>'+
+      '<td class="q">'+esc(r.text||'-')+'</td>'+
+      '<td class="n">'+fmtE(r.measured||0)+'</td>'+
+      '<td class="n"><b>'+fmtE(r.joules)+'</b></td>'+
+      '<td class="n" title="'+esc(r.tokens_in+' tokens in, '+r.tokens_out+
+        ' out \u00b7 confidence: '+r.confidence)+'">'+fmtE(r.min)+' \u2013 '+fmtE(r.max)+'</td>'+
+      '<td class="n">'+(x?x.toFixed(0)+'\u00d7':'-')+'</td>'+
+      '<td class="n">'+r.co2_g.toFixed(3)+' g</td>'+
+      '<td class="n">'+r.water_ml.toFixed(2)+' mL</td>'+
+      '</tr>';
+    }).join('')+'</table>';
+}
+$('cmodel').onchange=loadCompare;
+$('qday').onchange=()=>{ paintQDays();renderQ();renderScatter();renderCompare(); };
+$('rday').onchange=loadReport;
+$('cmpbox').ontoggle=()=>{ if($('cmpbox').open) loadCompare(); };
+
 const redraw=()=>{
   unitNote();renderQ();renderScatter();renderAsk();poll();
   if(!$('tab-report').hidden) loadReport();
@@ -1219,12 +1784,64 @@ try{startTab=localStorage.getItem('solarbot-tab')||'live';}catch(e){}
 if(!document.getElementById('tab-'+startTab)) startTab='live';
 showTab(startTab);
 models();poll();qlog();files();unitNote();
+$('face').onclick=stepFace;
+$('face').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();stepFace();}};
+paintFace();
+setInterval(()=>{faceStep++;paintFace();},420);
+/* ---- the skin switch -------------------------------------------------
+   Paper is on unless you turn it off, so the new look is what you see and one
+   click puts the old one back beside it for comparison. */
+function paintSkin(){
+  const on=localStorage.getItem('skin')!=='plain';
+  document.documentElement.classList.toggle('paper',on);
+  $('skin').textContent=on?'skin: paper':'skin: original';
+  paintPhaseBar();
+}
+/* The bar Ambika liked in the report, put under the live graph as well.
+   Once the bot has answered something it shows how that question split across
+   the phases; before that it stands in as the key for the bands on the graph,
+   drawn in equal parts and faded so it does not claim to be a measurement. */
+function paintPhaseBar(){
+  const box=$('phasebar'); if(!box) return;
+  const names=['listening','transcribing','answering'];
+  let q=null;
+  for(const r of (lastQ||[])) if(!q||r.t>q.t) q=r;
+  const secs=names.map(n=>q?(((q.phases||{})[n]||{}).seconds||0):0);
+  const tot=secs.reduce((a,b)=>a+b,0);
+  const live=tot>0.05;
+  const w=names.map((n,i)=>live?secs[i]/tot*100:100/names.length);
+  const tip=names.map((n,i)=>n+' '+secs[i].toFixed(1)+' s, '+
+    fmtE((((q||{}).phases||{})[n]||{}).joules||0)).join(' \u00b7 ');
+  box.innerHTML=
+    '<div class="pbar"'+(live?' title="'+esc(tip)+'"':' style="opacity:.42"')+'>'+
+    names.map((n,i)=>'<span style="width:'+w[i].toFixed(1)+'%;background:'+
+      PHC(n)+'"></span>').join('')+'</div>'+
+    '<div class="key">phases:'+
+    names.map((n,i)=>'<span class="sw" style="background:'+PHC(n)+
+      ';margin-left:'+(i?12:10)+'px"></span>'+n).join('')+
+    (live?'':'<span style="opacity:.6;margin-left:16px">'+
+      '\u2014 nothing asked yet, so these are only the colours</span>')+
+    '</div>';
+}
+$('skin').onclick=()=>{
+  localStorage.setItem('skin',localStorage.getItem('skin')==='plain'?'paper':'plain');
+  paintSkin();draw();drawHist();
+};
+paintSkin();
+/* what this page cost to load, stated the way her site states it */
+addEventListener('load',()=>{
+  try{
+    let b=(performance.getEntriesByType('navigation')[0]||{}).transferSize||0;
+    for(const r of performance.getEntriesByType('resource')) b+=r.transferSize||0;
+    if(b) $('pagecost').textContent='this page: '+(b/1024).toFixed(1)+' kB';
+  }catch(e){}
+});
 setInterval(poll,1000);setInterval(qlog,2000);setInterval(files,30000);
 </script>
 """
 
 
-def build_report(rows, unit="J", panel="5", toolbar=False):
+def build_report(rows, unit="J", panel="5", toolbar=False, day=""):
     """A standalone page you can open, read, hand over, or print to PDF.
 
     The spreadsheet export is for analysis. This is for showing someone.
@@ -1276,10 +1893,12 @@ def build_report(rows, unit="J", panel="5", toolbar=False):
 
     bar = ""
     if toolbar:
-        qs = "unit=%s&panel=%s" % (urllib.parse.quote(unit), urllib.parse.quote(str(panel)))
+        qs = "unit=%s&panel=%s&day=%s" % (urllib.parse.quote(unit),
+                                          urllib.parse.quote(str(panel)),
+                                          urllib.parse.quote(day))
         units = " ".join(
-            '<a href="/report?unit=%s&panel=%s"%s>%s</a>'
-            % (u, urllib.parse.quote(str(panel)),
+            '<a href="/report?unit=%s&panel=%s&day=%s"%s>%s</a>'
+            % (u, urllib.parse.quote(str(panel)), urllib.parse.quote(day),
                ' class="on"' if u == unit else "", name)
             for u, name in (("J", "joules"), ("mWh", "mWh"), ("mAh", "mAh"),
                             ("pct", "% of charge"), ("sun", "sun seconds")))
@@ -1366,7 +1985,7 @@ def build_report(rows, unit="J", panel="5", toolbar=False):
 <main>
 %s
 <h1>Solarbot energy report</h1>
-<div class="sub">Generated %s &middot; %d question%s logged &middot; energy shown in %s</div>
+<div class="sub">%s &middot; generated %s &middot; %d question%s &middot; energy shown in %s</div>
 
 <h2>Totals</h2>
 <p class="note"><b>%s</b> spent answering across all questions, costing <b>%s</b> in total
@@ -1391,7 +2010,8 @@ leaves what the thinking actually cost.</p>
 internal rails: processor, memory, wifi. It does not include the Whisplay HAT's screen and
 speaker, anything on USB, or the PiSugar's conversion losses, so the real drain on the
 battery is somewhat higher.</p>
-</main>""" % (bar, time.strftime("%Y-%m-%d %H:%M"), len(rows),
+</main>""" % (bar, ("All days" if not day else day),
+              time.strftime("%Y-%m-%d %H:%M"), len(rows),
               "" if len(rows) == 1 else "s", esc(lbl),
               fmt_t(all_t), e(all_j),
               summary or "<tr><td colspan=6>nothing logged yet</td></tr>",
@@ -1399,15 +2019,163 @@ battery is somewhat higher.</p>
               items or "<p class='note'>No questions recorded yet.</p>")
 
 
+# The five state drawings, the same ones the bot shows on its own screen.
+# They live in faces/<state>/<0-2>.png next to this script. Serving them is the
+# only file serving this program does, so the path is checked against a fixed
+# list rather than being resolved against the filesystem.
+FACE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "faces")
+FACE_STATES = ("idle", "listening", "detecting", "recognizing", "answering")
+
+
+def read_day(day):
+    """One day of the log, averaged to the minute.
+
+    A day is 86400 rows, which is four megabytes down the wire and far more
+    detail than anyone reads on a chart a thousand pixels wide. Averaging to
+    the minute gives 1440 points, and the peak within each minute is kept
+    alongside the mean so a short burst is still visible rather than smoothed
+    away.
+
+    Minutes with no reading are left out entirely instead of being filled in.
+    That matters here: a gap means the bot was off or the logger was not
+    running, and that is exactly the thing worth seeing.
+    """
+    if not day or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return {"day": day, "error": "no such day"}
+    path = os.path.join(DATA_DIR, "power-%s.csv" % day)
+    if not os.path.exists(path):
+        return {"day": day, "error": "no such day"}
+
+    buckets = {}
+    joules = 0.0
+    seconds = 0
+    peak = 0.0
+    bat_first = bat_last = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split(",")
+                if len(parts) < 4 or parts[0] == "time":
+                    continue
+                try:
+                    t = int(float(parts[1]))
+                    total = float(parts[2])
+                    cpu = float(parts[3])
+                except ValueError:
+                    continue
+                # One row is one second, so watts and joules are the same number.
+                joules += total
+                seconds += 1
+                if total > peak:
+                    peak = total
+                try:
+                    lvl = float(parts[4])
+                    if bat_first is None:
+                        bat_first = lvl
+                    bat_last = lvl
+                except (IndexError, ValueError):
+                    pass
+                m = t - (t % 60)
+                b = buckets.get(m)
+                if b is None:
+                    buckets[m] = [total, cpu, total, 1]   # sum, cpusum, max, n
+                else:
+                    b[0] += total
+                    b[1] += cpu
+                    if total > b[2]:
+                        b[2] = total
+                    b[3] += 1
+    except OSError as e:
+        return {"day": day, "error": str(e)}
+
+    points = [[m, round(v[0] / v[3], 3), round(v[1] / v[3], 3), round(v[2], 3)]
+              for m, v in sorted(buckets.items())]
+    return {
+        "day": day,
+        "points": points,                      # minute, mean W, mean cpu W, peak W
+        "seconds": seconds,                    # how much of the day was logged
+        "joules": round(joules, 1),
+        "wh": round(joules / 3600.0, 3),
+        "mean": round(joules / seconds, 3) if seconds else 0,
+        "peak": round(peak, 3),
+        "battery": {"first": bat_first, "last": bat_last},
+    }
+
+
+def compare_models():
+    """The cloud models worth offering in the dropdown.
+
+    The knowledge base holds seventy-odd models, most of them provider variants
+    nobody would recognise. These are the families you would actually name when
+    asked "what if I had asked ChatGPT instead".
+    """
+    if ecocost is None:
+        return []
+    try:
+        ids = sorted(ecocost.get_kb().models)
+    except Exception:
+        return []
+    keep = ("gpt-", "claude-", "gemini-", "deepseek-", "grok")
+    return [m for m in ids if m.startswith(keep)]
+
+
+def compare_question(q, model):
+    """What one logged question would have cost in a data centre, in joules.
+
+    Returns None when there is honestly nothing to say: no ecocost installed, a
+    model it does not know, or a question that never reached the answering
+    phase and so has no output to price.
+    """
+    if ecocost is None:
+        return None
+    answering = ((q.get("phases") or {}).get("answering") or {}).get("seconds") or 0
+    if answering <= 0:
+        return None
+    text = q.get("text") or ""
+    tokens_in = int((len(BOT_SYSTEM) + len(text)) / CHARS_PER_TOKEN) + 1
+    tokens_out = max(1, int(round(answering * TOKENS_PER_SECOND)))
+    try:
+        r = ecocost.estimate(model, input_tokens=tokens_in, output_tokens=tokens_out)
+    except Exception:
+        return None
+    e = r["energy"]
+    return {
+        # ecocost answers in watt-hours; the rest of this page speaks joules.
+        "joules": round(e["value"] * 3600, 1),
+        "min": round(e["min"] * 3600, 1),
+        "max": round(e["max"] * 3600, 1),
+        "co2_g": r["carbon"]["value"],
+        "water_ml": r["water"]["value"],
+        "confidence": r["confidence"]["level"],
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
     def _send(self, code, body, ctype):
+        """Send one response, and say out loud that it must not be kept.
+
+        Nothing here said anything about caching, and a reply with no
+        Cache-Control, no ETag and no Last-Modified lets the browser invent an
+        expiry of its own. It does. That is how a page built around a meter
+        that moves every second ends up showing yesterday, and how a freshly
+        deployed version keeps serving the old one: the request never reaches
+        the Pi, so nothing on this side can tell that it happened.
+
+        Everything sent from here is either a live reading or a page built
+        around one, so all of it is no-store. The drawn faces are the only
+        thing worth keeping and they are written out separately, with a day of
+        cache, because the animation swaps between them twice a second.
+        """
         body = body.encode() if isinstance(body, str) else body
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1415,6 +2183,23 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0].rstrip("/") or "/"
         if path == "/":
             return self._send(200, PAGE, "text/html; charset=utf-8")
+        if path.startswith("/faces/"):
+            parts = path[len("/faces/"):].split("/")
+            if (len(parts) != 2 or parts[0] not in FACE_STATES
+                    or parts[1] not in ("0.png", "1.png", "2.png")):
+                return self._send(404, b"no", "text/plain")
+            try:
+                with open(os.path.join(FACE_DIR, parts[0], parts[1]), "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                return self._send(404, b"no", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            # they never change, so let the browser keep them for a day
+            self.send_header("Cache-Control", "max-age=86400")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         if path == "/api/samples":
             with samples_lock:
                 rows = [[round(t, 3), round(w, 4), round(c, 4), round(p, 4)]
@@ -1434,6 +2219,51 @@ class Handler(BaseHTTPRequestHandler):
                                                "panel": pan,
                                                "session": session_report()}),
                               "application/json")
+        if path == "/api/compare":
+            q = {}
+            if "?" in self.path:
+                for part in self.path.split("?", 1)[1].split("&"):
+                    k, _, v = part.partition("=")
+                    q[k] = urllib.parse.unquote_plus(v)
+            model = q.get("model") or COMPARE_MODEL
+            out = []
+            with questions_lock:
+                rows = list(questions)
+            for item in rows:
+                c = compare_question(item, model)
+                if not c:
+                    continue
+                c.update(t=item.get("t"), iso=item.get("iso"),
+                         text=item.get("text"),
+                         measured=item.get("above_idle"),
+                         seconds=(item.get("total") or {}).get("seconds"))
+                out.append(c)
+            return self._send(200, json.dumps({
+                "available": ecocost is not None,
+                "model": model,
+                "models": compare_models(),
+                "tokens_per_second": TOKENS_PER_SECOND,
+                "bot_model": BOT_MODEL,
+                "questions": out,
+            }), "application/json")
+        if path == "/api/days":
+            # Which days there is anything to look at, newest first.
+            try:
+                names = sorted(os.listdir(DATA_DIR), reverse=True)
+            except OSError:
+                names = []
+            days = [n[6:-4] for n in names
+                    if n.startswith("power-") and n.endswith(".csv")]
+            return self._send(200, json.dumps({"days": days}),
+                              "application/json")
+        if path == "/api/history":
+            q = {}
+            if "?" in self.path:
+                for part in self.path.split("?", 1)[1].split("&"):
+                    k, _, v = part.partition("=")
+                    q[k] = urllib.parse.unquote_plus(v)
+            return self._send(200, json.dumps(read_day(q.get("day", ""))),
+                              "application/json")
         if path in ("/report", "/download/report.html"):
             q = {}
             if "?" in self.path:
@@ -1442,9 +2272,16 @@ class Handler(BaseHTTPRequestHandler):
                     q[k] = urllib.parse.unquote_plus(v)
             with questions_lock:
                 rows = list(questions)
+            # An empty day means every day, which is what the report always was.
+            day = q.get("day", "")
+            if day:
+                rows = [r for r in rows
+                        if time.strftime("%Y-%m-%d",
+                                         time.localtime(r.get("t", 0))) == day]
             return self._send(200, build_report(rows, q.get("unit", "J"),
                                                 q.get("panel", "5"),
-                                                toolbar=(path == "/report")),
+                                                toolbar=(path == "/report"),
+                                                day=day),
                               "text/html; charset=utf-8")
         if path == "/download/questions.csv":
             with questions_lock:
